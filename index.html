@@ -258,10 +258,13 @@ function parseTabImport(raw){
 // Convert UG's inline [ch]Chord[/ch] format → TabIt's [Chord] inline format,
 // then hand off to the existing parseTabImport pipeline.
 function parseUGContent(raw, meta={}){
-  // Strip [tab]…[/tab] block wrappers, convert [ch]X[/ch] → [X]
+  // Strip [tab]…[/tab] block wrappers
+  // Replace [ch] and [/ch] with spaces of the EXACT same length (4 and 5 chars)
+  // so the lateral column position of the chord perfectly aligns with lyrics below it
   const converted = raw
     .replace(/\[tab\]([\s\S]*?)\[\/tab\]/g, '$1')
-    .replace(/\[ch\]([^\[]+)\[\/ch\]/g, '[$1]')
+    .replace(/\[ch\]/g, '    ')
+    .replace(/\[\/ch\]/g, '     ')
     .trim();
   // Build a header line so parseTabImport can extract title/artist/key/capo
   const header = [
