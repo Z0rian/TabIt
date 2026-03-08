@@ -1,0 +1,1422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+  <meta name="theme-color" content="#ffffff" id="theme-color-meta"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
+  <meta name="apple-mobile-web-app-title" content="TabIt"/>
+  <link rel="manifest" href="manifest.json"/>
+  <link rel="apple-touch-icon" href="icons/icon-192.png"/>
+  <title>TabIt</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Crimson+Text:ital,wght@0,400;0,600;1,400&family=Courier+Prime&display=swap" rel="stylesheet"/>
+  <style>
+    /* ── THEMES ──────────────────────────────────────────────────────────── */
+    :root {
+      --bg:#ffffff; --surface:#f5f7fa; --surface2:#eef1f7; --surface3:#e6eaf4;
+      --border:#d4d9e8; --border2:#bec5d8;
+      --text:#080c18; --text-sub:#4a5470; --text-faint:#8892aa; --text-ghost:#c4cad8;
+      --accent:#1a4fc4; --accent-dark:#0d3490; --accent-text:#ffffff;
+      --chord:#1a4fc4; --chord-bg:rgba(26,79,196,0.07); --chord-border:rgba(26,79,196,0.28);
+      --chord-active:rgba(26,79,196,0.15); --lyric:#080c18; --danger:#cc2222;
+      --header-bg:#ffffff; --sheet-bg:#ffffff; --scrollbar:#c0c8dc; --scheme:light;
+    }
+    [data-theme=dark] {
+      --bg:#000000; --surface:#0d1117; --surface2:#010409; --surface3:#131b25;
+      --border:#1e2a3a; --border2:#2a3a50;
+      --text:#ffffff; --text-sub:#8899bb; --text-faint:#445566; --text-ghost:#2a3a50;
+      --accent:#4488ee; --accent-dark:#2266cc; --accent-text:#ffffff;
+      --chord:#88bbff; --chord-bg:rgba(136,187,255,0.09); --chord-border:rgba(136,187,255,0.28);
+      --chord-active:rgba(136,187,255,0.18); --lyric:#ffffff; --danger:#ee5555;
+      --header-bg:#000000; --sheet-bg:#0d1117; --scrollbar:#2a3850; --scheme:dark;
+    }
+    [data-theme=sepia] {
+      --bg:#faf6ee; --surface:#f2ece0; --surface2:#e8e0ce; --surface3:#ddd4c0;
+      --border:#cec5ae; --border2:#b8ae98;
+      --text:#18100a; --text-sub:#6a5840; --text-faint:#a09070; --text-ghost:#d0c8b0;
+      --accent:#8b4800; --accent-dark:#6a3400; --accent-text:#ffffff;
+      --chord:#7a3e00; --chord-bg:rgba(139,72,0,0.07); --chord-border:rgba(139,72,0,0.25);
+      --chord-active:rgba(139,72,0,0.15); --lyric:#18100a; --danger:#cc2222;
+      --header-bg:#faf6ee; --sheet-bg:#f2ece0; --scrollbar:#c0b090; --scheme:light;
+    }
+    [data-theme=slate] {
+      --bg:#f4f6fb; --surface:#eaedf6; --surface2:#dde2f0; --surface3:#d0d6ea;
+      --border:#c4cce0; --border2:#b0bace;
+      --text:#080e20; --text-sub:#445070; --text-faint:#8898b8; --text-ghost:#c8d0e0;
+      --accent:#3355bb; --accent-dark:#1e3a88; --accent-text:#ffffff;
+      --chord:#2a4aaa; --chord-bg:rgba(51,85,187,0.07); --chord-border:rgba(51,85,187,0.26);
+      --chord-active:rgba(51,85,187,0.15); --lyric:#080e20; --danger:#cc2222;
+      --header-bg:#f4f6fb; --sheet-bg:#eaedf6; --scrollbar:#b8c4d8; --scheme:light;
+    }
+
+    /* ── BASE ─────────────────────────────────────────────────────────────── */
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html{height:100%;-webkit-text-size-adjust:100%}
+    body{height:100%;min-height:100dvh;background:var(--bg);font-family:'Crimson Text',Georgia,serif;
+      color:var(--text);overscroll-behavior:none;-webkit-tap-highlight-color:transparent;color-scheme:var(--scheme)}
+    #root{height:100%;min-height:100dvh;display:flex;flex-direction:column}
+    ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:var(--surface2)}
+    ::-webkit-scrollbar-thumb{background:var(--scrollbar);border-radius:2px}
+    input,select,textarea{color-scheme:var(--scheme);font-family:inherit}
+    button{font-family:'Crimson Text',Georgia,serif;cursor:pointer}
+    @keyframes slideUp{from{transform:translateY(100%);opacity:0}to{transform:translateY(0);opacity:1}}
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* ── REUSABLES ────────────────────────────────────────────────────────── */
+    .tap{min-height:44px;min-width:44px;display:flex;align-items:center;justify-content:center}
+    .sheet-overlay{position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.45);
+      backdrop-filter:blur(4px);animation:fadeIn .2s ease}
+    .sheet{position:fixed;bottom:0;left:0;right:0;z-index:201;background:var(--sheet-bg);
+      border-top:1.5px solid var(--border);border-radius:20px 20px 0 0;
+      padding:0 0 env(safe-area-inset-bottom,16px);
+      animation:slideUp .32s cubic-bezier(.34,1.56,.64,1);max-height:93dvh;overflow-y:auto;
+      box-shadow:0 -4px 32px rgba(0,0,0,0.15)}
+    .sheet-handle{width:36px;height:4px;background:var(--border2);border-radius:2px;margin:10px auto 14px}
+    .sheet-header{display:flex;align-items:center;justify-content:space-between;padding:0 20px 12px}
+    .sheet-title{font-size:20px;font-weight:600;color:var(--text)}
+    .sheet-close{background:var(--surface2);border:1px solid var(--border);border-radius:50%;
+      width:30px;height:30px;display:flex;align-items:center;justify-content:center;
+      color:var(--text-sub);font-size:14px;cursor:pointer;flex-shrink:0}
+    .chord-badge{display:inline-block;background:var(--chord-bg);border:1px solid var(--chord-border);
+      border-radius:4px;color:var(--chord);font-weight:700;font-family:'Crimson Text',Georgia,serif;
+      padding:0 5px;cursor:pointer;white-space:nowrap;line-height:1.5;
+      transition:background .12s;-webkit-tap-highlight-color:transparent}
+    .chord-badge:active{background:var(--chord-active)}
+    .btn-primary{background:var(--accent);border:none;border-radius:9px;color:var(--accent-text);
+      font-weight:700;font-size:15px;padding:11px 20px;cursor:pointer;
+      font-family:'Crimson Text',Georgia,serif;box-shadow:0 2px 8px rgba(0,0,0,0.12);transition:opacity .15s}
+    .btn-primary:active{opacity:.82}
+    .btn-secondary{background:var(--surface2);border:1.5px solid var(--border);border-radius:9px;
+      color:var(--text-sub);font-size:14px;padding:10px 18px;
+      font-family:'Crimson Text',Georgia,serif;font-weight:600;transition:background .15s}
+    .btn-secondary:active{background:var(--surface3)}
+    .btn-ctrl{background:var(--surface);border:1.5px solid var(--border);border-radius:7px;
+      color:var(--text-sub);font-size:13px;padding:5px 11px;transition:background .12s}
+    .btn-ctrl:active{background:var(--surface2)}
+    .inp{width:100%;background:var(--surface);border:1.5px solid var(--border);border-radius:9px;
+      padding:10px 13px;color:var(--text);font-family:'Crimson Text',Georgia,serif;
+      font-size:15px;outline:none;transition:border-color .15s}
+    .inp:focus{border-color:var(--accent)}
+    .tag{background:var(--chord-bg);border:1px solid var(--chord-border);border-radius:20px;
+      padding:2px 9px;font-size:11px;color:var(--chord);font-weight:600}
+    .section-lbl{color:var(--text-faint);font-size:11px;font-weight:700;
+      text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px}
+    .spinner{width:15px;height:15px;border:2px solid var(--border);border-top-color:var(--accent);
+      border-radius:50%;animation:spin .7s linear infinite;display:inline-block;flex-shrink:0}
+    #install-banner{position:fixed;bottom:0;left:0;right:0;z-index:300;background:var(--header-bg);
+      border-top:1.5px solid var(--accent);
+      padding:14px 18px calc(14px + env(safe-area-inset-bottom,0px));
+      display:flex;align-items:center;gap:12px;animation:slideUp .3s ease;
+      box-shadow:0 -2px 16px rgba(0,0,0,0.1)}
+    #install-banner.hidden{display:none}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<div id="install-banner" class="hidden">
+  <span style="font-size:22px">🎸</span>
+  <div style="flex:1">
+    <div style="font-weight:600;font-size:14px;color:var(--text)">Add TabIt to Home Screen</div>
+    <div style="font-size:11px;color:var(--text-sub)">Works offline · Instant access</div>
+  </div>
+  <button class="btn-primary" id="install-btn" style="font-size:13px;padding:8px 16px">Install</button>
+  <button id="install-dismiss" style="background:none;border:none;font-size:18px;padding:4px;color:var(--text-faint)">✕</button>
+</div>
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script type="text/babel">
+const {useState,useEffect,useRef,useCallback,useMemo} = React;
+
+// ─── MUSIC THEORY ─────────────────────────────────────────────────────────────
+const CHROM=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const ENARH={Db:'C#',Eb:'D#',Gb:'F#',Ab:'G#',Bb:'A#','E#':'F','B#':'C',Cb:'B',Fb:'E'};
+const S2FLAT={'C#':'Db','D#':'Eb','G#':'Ab','A#':'Bb'};
+const n2s=n=>CHROM.indexOf(ENARH[n]??n);
+const CIRCLE_KEYS=['C','G','D','A','E','B','F#','Db','Ab','Eb','Bb','F'];
+const CIRCLE_SEMS=[0,7,2,9,4,11,6,1,8,3,10,5];
+const FLAT_SEMS=new Set([1,3,5,8,10]);
+function s2nSmart(s,flat=false){const n=CHROM[((s%12)+12)%12];return(flat&&S2FLAT[n])?S2FLAT[n]:n;}
+function txNote(n,d,flat=false){return s2nSmart(n2s(n)+d,flat);}
+function txChord(chord,d,flat=false){
+  if(!d)return chord;
+  const m=chord.match(/^([A-G][#b]?)(.*)$/);if(!m)return chord;
+  const sl=m[2].match(/^(.*)(\/[A-G][#b]?)$/);
+  if(sl)return txNote(m[1],d,flat)+sl[1]+'/'+txNote(sl[2].slice(1),d,flat);
+  return txNote(m[1],d,flat)+m[2];
+}
+function shortTx(fromKey,toSem){let d=toSem-n2s(fromKey);while(d>6)d-=12;while(d<=-6)d+=12;return d;}
+function isChord(s){return/^[A-G][#b]?(?:m|maj|min|aug|dim|sus|add)?(?:\d+)?(?:\/[A-G][#b]?)?$/.test(s)&&s.length<=10;}
+function isSectionHdr(line){return/^\[[^\[\]]+\]$/.test(line)&&!isChord(line.slice(1,-1));}
+function parseSegs(line){
+  const rx=/\[([^\[\]]+)\]/g,parts=[];let last=0,m;
+  while((m=rx.exec(line))!==null){if(m.index>last)parts.push({t:'txt',v:line.slice(last,m.index)});parts.push({t:'crd',v:m[1]});last=m.index+m[0].length;}
+  if(last<line.length)parts.push({t:'txt',v:line.slice(last)});
+  const segs=[];
+  for(let i=0;i<parts.length;i++){
+    if(parts[i].t==='crd'){const txt=(i+1<parts.length&&parts[i+1].t==='txt')?parts[i+1].v:'';segs.push({chord:parts[i].v,text:txt});if(txt)i++;}
+    else segs.push({chord:null,text:parts[i].v});
+  }
+  return segs;
+}
+
+// ─── CHORD VOICINGS ───────────────────────────────────────────────────────────
+const CV={
+  C:[{frets:[-1,3,2,0,1,0],bF:1,lbl:"Open"},{frets:[8,10,10,9,8,8],bF:8,lbl:"8fr",bar:{f:8,a:0,b:5}}],
+  D:[{frets:[-1,-1,0,2,3,2],bF:1,lbl:"Open"},{frets:[5,5,7,7,7,5],bF:5,lbl:"5fr",bar:{f:5,a:0,b:5}}],
+  E:[{frets:[0,2,2,1,0,0],bF:1,lbl:"Open"},{frets:[7,9,9,8,7,7],bF:7,lbl:"7fr",bar:{f:7,a:0,b:5}}],
+  F:[{frets:[1,3,3,2,1,1],bF:1,lbl:"Barre",bar:{f:1,a:0,b:5}},{frets:[-1,-1,3,2,1,1],bF:1,lbl:"Mini-F"}],
+  G:[{frets:[3,2,0,0,0,3],bF:1,lbl:"Open"},{frets:[3,5,5,4,3,3],bF:3,lbl:"3fr",bar:{f:3,a:0,b:5}}],
+  A:[{frets:[-1,0,2,2,2,0],bF:1,lbl:"Open"},{frets:[5,7,7,6,5,5],bF:5,lbl:"5fr",bar:{f:5,a:0,b:5}}],
+  B:[{frets:[-1,2,4,4,4,2],bF:2,lbl:"Barre",bar:{f:2,a:1,b:5}}],
+  Am:[{frets:[-1,0,2,2,1,0],bF:1,lbl:"Open"},{frets:[5,7,7,5,5,5],bF:5,lbl:"5fr",bar:{f:5,a:0,b:5}}],
+  Em:[{frets:[0,2,2,0,0,0],bF:1,lbl:"Open"},{frets:[7,9,9,7,7,7],bF:7,lbl:"7fr",bar:{f:7,a:0,b:5}}],
+  Dm:[{frets:[-1,-1,0,2,3,1],bF:1,lbl:"Open"},{frets:[5,5,7,7,6,5],bF:5,lbl:"5fr",bar:{f:5,a:0,b:5}}],
+  Bm:[{frets:[-1,2,4,4,3,2],bF:2,lbl:"Barre",bar:{f:2,a:1,b:5}}],
+  Cm:[{frets:[3,3,5,5,4,3],bF:3,lbl:"3fr",bar:{f:3,a:0,b:5}}],
+  "F#m":[{frets:[2,4,4,2,2,2],bF:2,lbl:"Barre",bar:{f:2,a:0,b:5}}],
+  "C#m":[{frets:[4,6,6,4,4,4],bF:4,lbl:"Barre",bar:{f:4,a:0,b:5}}],
+  "G#m":[{frets:[4,6,6,4,4,4],bF:4,lbl:"4fr",bar:{f:4,a:0,b:5}}],
+  G7:[{frets:[3,2,0,0,0,1],bF:1,lbl:"Open"}],
+  D7:[{frets:[-1,-1,0,2,1,2],bF:1,lbl:"Open"}],
+  A7:[{frets:[-1,0,2,0,2,0],bF:1,lbl:"Open"}],
+  E7:[{frets:[0,2,0,1,0,0],bF:1,lbl:"Open"}],
+  B7:[{frets:[-1,2,1,2,0,2],bF:1,lbl:"Open"}],
+  Am7:[{frets:[-1,0,2,0,1,0],bF:1,lbl:"Open"}],
+  Em7:[{frets:[0,2,0,0,0,0],bF:1,lbl:"Open"}],
+  Dm7:[{frets:[-1,-1,0,2,1,1],bF:1,lbl:"Open"}],
+  Cmaj7:[{frets:[-1,3,2,0,0,0],bF:1,lbl:"Open"}],
+  Gmaj7:[{frets:[3,2,0,0,0,2],bF:1,lbl:"Open"}],
+  Fmaj7:[{frets:[-1,-1,3,2,1,0],bF:1,lbl:"Open"}],
+  Cadd9:[{frets:[-1,3,2,0,3,3],bF:1,lbl:"Open"}],
+  Dsus4:[{frets:[-1,-1,0,2,3,3],bF:1,lbl:"Open"}],
+  Asus4:[{frets:[-1,0,2,2,3,0],bF:1,lbl:"Open"}],
+  Gsus4:[{frets:[3,3,0,0,1,3],bF:1,lbl:"Open"}],
+  Am7:[{frets:[-1,0,2,0,1,0],bF:1,lbl:"Open"}],
+  Db:[{frets:[-1,4,6,6,6,4],bF:4,lbl:"4fr",bar:{f:4,a:1,b:5}}],
+  "F#":[{frets:[2,4,4,3,2,2],bF:2,lbl:"2fr",bar:{f:2,a:0,b:5}}],
+  Ab:[{frets:[4,6,6,5,4,4],bF:4,lbl:"4fr",bar:{f:4,a:0,b:5}}],
+  Bb:[{frets:[-1,1,3,3,3,1],bF:1,lbl:"A-shape",bar:{f:1,a:1,b:5}},{frets:[6,8,8,7,6,6],bF:6,lbl:"E-shape",bar:{f:6,a:0,b:5}}],
+  Eb:[{frets:[-1,6,8,8,8,6],bF:6,lbl:"6fr",bar:{f:6,a:1,b:5}}],
+  "D/F#":[{frets:[2,0,0,2,3,2],bF:1,lbl:"Open"}],
+};
+function getVoicings(name){
+  if(CV[name])return CV[name];
+  const m=name.match(/^([A-G][#b]?)(.*)/);if(!m)return null;
+  const sem=n2s(m[1]);if(sem<0)return null;
+  const q=m[2],sharp=CHROM[((sem%12)+12)%12]+q,flat=(S2FLAT[CHROM[((sem%12)+12)%12]]||CHROM[((sem%12)+12)%12])+q;
+  return CV[sharp]||CV[flat]||null;
+}
+
+// ─── TAB IMPORTER ─────────────────────────────────────────────────────────────
+function parseTabImport(raw){
+  const lines=raw.split('\n');
+  let title='Imported Song',artist='Unknown',key='G',capo=0;
+  for(const line of lines){const t=line.trim();if(!t)continue;const m=t.match(/^(.+?)\s+(?:chords?\s+)?by\s+(.+?)$/i);if(m){title=m[1].replace(/\s+chords?$/i,'').trim();artist=m[2].trim();}break;}
+  for(const line of lines){const t=line.trim();const km=t.match(/^Key:\s*([A-G][#b]?m?)/i);if(km)key=km[1];const cm=t.match(/^Capo[:\s]+(\d+)/i);if(cm)capo=parseInt(cm[1]);}
+  const hasInline=lines.some(l=>/\[[A-G][#b]?/.test(l)&&!isSectionHdr(l.trim()));
+  if(hasInline){const si=lines.findIndex(l=>isSectionHdr(l.trim())||/\[[A-G][#b]?/.test(l));return{title,artist,key,capo,tempo:100,content:lines.slice(Math.max(0,si)).join('\n').trim()};}
+  let startIdx=lines.findIndex(l=>{const t=l.trim();return/^\[.+\]$/.test(t)&&!isChord(t.slice(1,-1));});
+  if(startIdx===-1)startIdx=0;
+  const isTabLine=l=>/^\s*[eEBGDAd]\|/.test(l);
+  const isChordLine=l=>{const t=l.trim();if(!t)return false;const toks=t.split(/\s+/).filter(Boolean);return toks.length>0&&toks.every(tok=>isChord(tok)||/^x\d+$/i.test(tok));};
+  const mergeChordLyric=(cl,ll)=>{
+    const chords=[];const rx=/(\S+)/g;let m;
+    while((m=rx.exec(cl))!==null)if(isChord(m[1]))chords.push({chord:m[1],col:m.index});
+    if(!chords.length)return ll.trimEnd();
+    let result=ll;while(result.length<chords[chords.length-1].col)result+=' ';
+    for(let i=chords.length-1;i>=0;i--){const{chord,col}=chords[i];const at=Math.min(col,result.length);result=result.slice(0,at)+'['+chord+']'+result.slice(at);}
+    return result.trimEnd();
+  };
+  const cl=lines.slice(startIdx);const out=[];let i=0;
+  while(i<cl.length){
+    const line=cl[i];const t=line.trim();
+    if(/^Page\s+\d+\/\d+/i.test(t)||isTabLine(line)||/^\s*Fill\s+\d+/i.test(line)||/^[\/\\]\s*=/.test(t)||/^(?:Link to|Tuning:|Difficulty:|Strumming|Suggested|Alternative)/i.test(t)||(/^[\d\s&]+$/.test(t)&&t.length<20)){i++;continue;}
+    if(/^\[.+\]$/.test(t)&&!isChord(t.slice(1,-1))){out.push(t);i++;continue;}
+    if(!t){out.push('');i++;continue;}
+    if(isChordLine(line)){
+      const nextLine=cl[i+1];
+      if(nextLine!==undefined){const nextT=nextLine.trim();const ok=nextT&&!isChordLine(nextLine)&&!isTabLine(nextLine)&&!/^\[.+\]$/.test(nextT);if(ok){out.push(mergeChordLyric(line,nextLine));i+=2;continue;}}
+      const chords=t.split(/\s+/).filter(tok=>isChord(tok));if(chords.length)out.push(chords.map(c=>'['+c+']').join(''));i++;continue;
+    }
+    out.push(t);i++;
+  }
+  const cleaned=[];let pb=false;
+  for(const l of out){if(l===''){if(!pb)cleaned.push('');pb=true;}else{cleaned.push(l);pb=false;}}
+  return{title,artist,key,capo,tempo:100,content:cleaned.join('\n').trim()};
+}
+
+// ─── GITHUB API HELPERS ───────────────────────────────────────────────────────
+const GH_API='https://api.github.com';
+
+// Read a file from the repo, returns {content, sha}
+async function ghGetFile(owner,repo,path,token){
+  const h={'Accept':'application/vnd.github.v3+json'};
+  if(token)h['Authorization']=`token ${token}`;
+  const r=await fetch(`${GH_API}/repos/${owner}/${repo}/contents/${path}`,{headers:h});
+  if(!r.ok){
+    if(r.status===404)return null; // file doesn't exist yet
+    throw new Error(`GitHub ${r.status} reading ${path}`);
+  }
+  const d=await r.json();
+  return{content:atob(d.content.replace(/\n/g,'')),sha:d.sha};
+}
+
+// Write (create or update) a file in the repo
+async function ghPutFile(owner,repo,path,content,message,token,sha=null){
+  const encoded=btoa(unescape(encodeURIComponent(content)));
+  const body={message,content:encoded};
+  if(sha)body.sha=sha;
+  const r=await fetch(`${GH_API}/repos/${owner}/${repo}/contents/${path}`,{
+    method:'PUT',
+    headers:{'Accept':'application/vnd.github.v3+json','Content-Type':'application/json',
+              'Authorization':`token ${token}`},
+    body:JSON.stringify(body),
+  });
+  if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(`GitHub ${r.status}: ${e.message||'unknown error'}`);}
+  return r.json();
+}
+
+// Read a file via raw.githubusercontent.com (no auth, no rate-limit concern for reading)
+async function ghRaw(owner,repo,path){
+  const r=await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/main/${path}?t=${Date.now()}`);
+  if(!r.ok)throw new Error(`Could not fetch ${path} (${r.status})`);
+  return r.text();
+}
+
+// Gist: create a new private gist, returns gistId
+async function ghCreateGist(token,content){
+  const r=await fetch(`${GH_API}/gists`,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':`token ${token}`},
+    body:JSON.stringify({description:'TabIt Songs Backup',public:false,files:{'tabit-songs.json':{content}}}),
+  });
+  if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(`Create gist: ${r.status} ${e.message||''}`);}
+  return (await r.json()).id;
+}
+
+// Gist: update existing gist
+async function ghUpdateGist(token,gistId,content){
+  const r=await fetch(`${GH_API}/gists/${gistId}`,{
+    method:'PATCH',
+    headers:{'Content-Type':'application/json','Authorization':`token ${token}`},
+    body:JSON.stringify({files:{'tabit-songs.json':{content}}}),
+  });
+  if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(`Update gist: ${r.status} ${e.message||''}`);}
+}
+
+// Gist: fetch content
+async function ghGetGist(token,gistId){
+  const h={};if(token)h['Authorization']=`token ${token}`;
+  const r=await fetch(`${GH_API}/gists/${gistId}`,{headers:h});
+  if(!r.ok)throw new Error(`Fetch gist: ${r.status}`);
+  const d=await r.json();
+  const file=d.files['tabit-songs.json'];
+  if(!file)throw new Error('No tabit-songs.json in gist');
+  if(file.truncated){const r2=await fetch(file.raw_url);return r2.text();}
+  return file.content;
+}
+
+// Make a stable URL slug from title+artist
+function slugify(title,artist){
+  return `${title}-${artist}`.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,64);
+}
+
+// ─── THEMES ───────────────────────────────────────────────────────────────────
+const THEMES=[
+  {id:'paper',name:'Paper',  emoji:'☀️',desc:'Clean white — high contrast'},
+  {id:'dark', name:'Dark',   emoji:'🌑',desc:'Pure black, white text'},
+  {id:'sepia',name:'Sepia',  emoji:'📜',desc:'Warm cream, classic feel'},
+  {id:'slate',name:'Slate',  emoji:'🪨',desc:'Cool blue-grey'},
+];
+const THEME_KEY='tabit_theme_v2';
+function getStoredTheme(){return localStorage.getItem(THEME_KEY)||'paper';}
+function applyTheme(id){
+  document.body.setAttribute('data-theme',id==='paper'?'':id);
+  const colors={dark:'#000000',sepia:'#faf6ee',slate:'#f4f6fb'};
+  document.getElementById('theme-color-meta')?.setAttribute('content',colors[id]||'#ffffff');
+  localStorage.setItem(THEME_KEY,id);
+}
+
+// ─── PERSISTENCE ──────────────────────────────────────────────────────────────
+const SONGS_KEY='tabit_songs_v3';
+const CFG_KEY='tabit_config_v1';
+const DEFAULT_CFG={ghToken:'',ghOwner:'',ghRepo:'tabit',ghGistId:'',lastSync:''};
+
+function loadSongs(){try{const r=localStorage.getItem(SONGS_KEY);if(r)return JSON.parse(r);}catch{}return INIT_SONGS;}
+function saveSongs(s){try{localStorage.setItem(SONGS_KEY,JSON.stringify(s));}catch{}}
+function loadCfg(){try{const r=localStorage.getItem(CFG_KEY);if(r)return{...DEFAULT_CFG,...JSON.parse(r)};}catch{}return{...DEFAULT_CFG};}
+function saveCfg(c){try{localStorage.setItem(CFG_KEY,JSON.stringify(c));}catch{}}
+
+// ─── CHORD DIAGRAM ────────────────────────────────────────────────────────────
+function ChordDiagram({chordName,voicing,capo}){
+  if(!voicing)return(
+    <div style={{padding:'20px 10px',textAlign:'center',color:'var(--text-sub)',fontSize:13}}>
+      No diagram for <strong style={{color:'var(--chord)'}}>{chordName}</strong>
+    </div>
+  );
+  const{frets,bF,bar}=voicing;
+  const W=154,H=172,PL=26,PT=42,PR=18;
+  const sw=(W-PL-PR)/5,fh=(H-PT-14)/5;
+  return(
+    <svg width={W} height={H} style={{display:'block',overflow:'visible'}}>
+      <text x={W/2} y={15} textAnchor="middle" fontSize={15} fill="var(--text)" fontWeight="700" fontFamily="Georgia,serif">{chordName}</text>
+      {capo>0&&bF===1&&<text x={W/2} y={PT-5} textAnchor="middle" fontSize={8} fill="var(--text-sub)">Capo {capo}</text>}
+      {bF===1
+        ?<rect x={PL} y={PT} width={5*sw} height={3.5} fill="var(--chord)" rx={2}/>
+        :<text x={PL-4} y={PT+fh*0.55} fontSize={9} fill="var(--chord)" textAnchor="end">{bF}fr</text>}
+      {[0,1,2,3,4,5].map(i=><line key={'h'+i} x1={PL} y1={PT+i*fh} x2={PL+5*sw} y2={PT+i*fh} stroke="var(--border2)" strokeWidth={1.5}/>)}
+      {[0,1,2,3,4,5].map(i=><line key={'v'+i} x1={PL+i*sw} y1={PT} x2={PL+i*sw} y2={PT+5*fh} stroke="var(--border2)" strokeWidth={1.5}/>)}
+      {bar&&<rect x={PL+bar.a*sw} y={PT+(bar.f-bF+0.5)*fh-2.5} width={(bar.b-bar.a)*sw} height={5} fill="var(--chord)" rx={2.5}/>}
+      {frets.map((f,si)=>{
+        const x=PL+si*sw;
+        if(f===-1)return<text key={si} x={x} y={PT-10} textAnchor="middle" fontSize={12} fill="var(--danger)" fontWeight="bold">x</text>;
+        if(f===0)return<circle key={si} cx={x} cy={PT-11} r={5} fill="none" stroke="var(--chord)" strokeWidth={1.5}/>;
+        return<circle key={si} cx={x} cy={PT+(f-bF+0.5)*fh} r={7.5} fill="var(--chord)"/>;
+      })}
+      <text x={W/2} y={H} textAnchor="middle" fontSize={9} fill="var(--text-faint)" fontFamily="Georgia,serif">{voicing.lbl}</text>
+    </svg>
+  );
+}
+
+function ChordSheet({chordName,capo,onClose}){
+  const voicings=getVoicings(chordName);
+  const[vi,setVi]=useState(0);
+  const count=voicings?voicings.length:0;
+  return(<>
+    <div className="sheet-overlay" onClick={onClose}/>
+    <div className="sheet" style={{paddingLeft:20,paddingRight:20}}>
+      <div className="sheet-handle"/>
+      <div className="sheet-header">
+        <span className="sheet-title">{chordName}</span>
+        <button className="sheet-close" onClick={onClose}>✕</button>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',alignItems:'center',paddingBottom:20,gap:14}}>
+        <ChordDiagram chordName={chordName} voicing={voicings?voicings[vi%count]:null} capo={capo}/>
+        {count>1&&(
+          <div style={{display:'flex',alignItems:'center',gap:16}}>
+            <button onClick={()=>setVi(v=>(v-1+count)%count)} style={{background:'var(--chord-bg)',border:'1px solid var(--chord-border)',borderRadius:8,color:'var(--chord)',fontSize:22,padding:'4px 14px',cursor:'pointer'}}>‹</button>
+            <span style={{color:'var(--text-sub)',fontSize:13}}>{vi%count+1} / {count}</span>
+            <button onClick={()=>setVi(v=>(v+1)%count)} style={{background:'var(--chord-bg)',border:'1px solid var(--chord-border)',borderRadius:8,color:'var(--chord)',fontSize:22,padding:'4px 14px',cursor:'pointer'}}>›</button>
+          </div>
+        )}
+      </div>
+    </div>
+  </>);
+}
+
+function CircleOfFifths({originalKey,semitones,onChange,onClose}){
+  const origSem=n2s(originalKey)%12,currSem=((origSem+semitones)%12+12)%12;
+  const sz=Math.min(window.innerWidth-48,300);
+  return(<>
+    <div className="sheet-overlay" onClick={onClose}/>
+    <div className="sheet" style={{paddingLeft:20,paddingRight:20}}>
+      <div className="sheet-handle"/>
+      <div className="sheet-header">
+        <span className="sheet-title">Transpose</span>
+        <button className="sheet-close" onClick={onClose}>✕</button>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:14,paddingBottom:24}}>
+        <div style={{color:'var(--text-sub)',fontSize:12}}>Tap a key to transpose</div>
+        <svg viewBox="-130 -130 260 260" width={sz} height={sz}>
+          {CIRCLE_KEYS.map((key,i)=>{
+            const angle=(i*30-90)*Math.PI/180,R=95,x=Math.cos(angle)*R,y=Math.sin(angle)*R;
+            const ks=CIRCLE_SEMS[i],isOrig=ks===origSem,isCurr=ks===currSem;
+            return(<g key={key} onClick={()=>onChange(shortTx(originalKey,ks))} style={{cursor:'pointer'}}>
+              <circle cx={x} cy={y} r={20} fill={isCurr?'var(--accent)':isOrig?'var(--chord-bg)':'var(--surface)'} stroke={isCurr?'var(--accent)':isOrig?'var(--chord-border)':'var(--border)'} strokeWidth={isCurr?2.5:isOrig?2:1}/>
+              <text x={x} y={y+1} textAnchor="middle" dominantBaseline="middle" fontSize={12} fill={isCurr?'var(--accent-text)':isOrig?'var(--chord)':'var(--text-sub)'} fontWeight={isCurr||isOrig?'bold':'normal'} fontFamily="Georgia,serif">{key}</text>
+            </g>);
+          })}
+          <circle cx={0} cy={0} r={55} fill="var(--surface)" stroke="var(--border)"/>
+          <text x={0} y={-12} textAnchor="middle" fontSize={24} fill="var(--chord)" fontWeight="bold" fontFamily="Georgia,serif">{semitones>0?'+'+semitones:semitones}</text>
+          <text x={0} y={6} textAnchor="middle" fontSize={10} fill="var(--text-sub)" fontFamily="Georgia,serif">semitones</text>
+          <text x={0} y={22} textAnchor="middle" fontSize={12} fill="var(--text)" fontWeight="bold" fontFamily="Georgia,serif">{txChord(originalKey,semitones,FLAT_SEMS.has(((n2s(originalKey)+semitones)%12+12)%12))}</text>
+        </svg>
+        <div style={{display:'flex',gap:10}}>
+          <button onClick={()=>onChange(0)} className="btn-secondary">Reset</button>
+          <button onClick={onClose} className="btn-primary">Done</button>
+        </div>
+      </div>
+    </div>
+  </>);
+}
+
+// ─── SONG LINE ─────────────────────────────────────────────────────────────────
+// Each segment is an inline-flex column: chord sits directly above its lyric text.
+// This means chords can NEVER overlap the line above — each line is fully self-contained.
+function SongLine({line,onChordClick,semitones,fontSize}){
+  if(isSectionHdr(line))return(
+    <div style={{color:'var(--accent)',fontWeight:700,fontSize:fontSize*0.8,
+      marginTop:fontSize*1.6,marginBottom:fontSize*0.4,letterSpacing:'0.12em',
+      textTransform:'uppercase',fontFamily:"'Crimson Text',Georgia,serif",
+      borderBottom:'1px solid var(--chord-border)',paddingBottom:3}}>
+      {line.slice(1,-1)}
+    </div>
+  );
+  if(!line.trim())return<div style={{height:'0.7em'}}/>;
+  const useFlat=FLAT_SEMS.has(((n2s(line.match(/\[([A-G][#b]?)/)?.[1]||'C')+semitones)%12+12)%12);
+  const segs=parseSegs(line);
+  const hasText=segs.some(s=>s.text.trim()),hasChords=segs.some(s=>s.chord);
+
+  // Chord-only line → badges in a wrapping flex row
+  if(!hasText&&hasChords)return(
+    <div style={{display:'flex',flexWrap:'wrap',gap:5,marginBottom:'0.6em',marginTop:'0.2em'}}>
+      {segs.filter(s=>s.chord).map((s,i)=>{
+        const d=txChord(s.chord,semitones,useFlat);
+        return<button key={i} className="chord-badge" style={{fontSize}} onClick={()=>onChordClick(d)}>{d}</button>;
+      })}
+    </div>
+  );
+
+  // Mixed line: each segment is a column of [chord][text]
+  return(
+    <div style={{marginBottom:'0.55em',fontFamily:"'Courier Prime','Courier New',monospace",lineHeight:1.85}}>
+      <div style={{display:'flex',flexWrap:'wrap',alignItems:'flex-end'}}>
+        {segs.map((seg,i)=>{
+          const disp=seg.chord?txChord(seg.chord,semitones,useFlat):null;
+          const mw=Math.max(disp?disp.length+0.8:0,seg.text.length||0);
+          return(
+            <span key={i} style={{display:'inline-flex',flexDirection:'column',alignItems:'flex-start',
+              minWidth:mw>0?mw+'ch':undefined}}>
+              {hasChords&&(
+                <span style={{height:'1.6em',display:'flex',alignItems:'center',paddingRight:2}}>
+                  {disp&&<button className="chord-badge"
+                    style={{fontSize:Math.round(fontSize*0.87),whiteSpace:'nowrap'}}
+                    onClick={()=>onChordClick(disp)}>{disp}</button>}
+                </span>
+              )}
+              <span style={{color:'var(--lyric)',fontSize,whiteSpace:'pre',lineHeight:1.85}}>
+                {seg.text||' '}
+              </span>
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── GLOBAL LIBRARY SEARCH ────────────────────────────────────────────────────
+function GlobalLibrarySearch({cfg,onImport,onClose}){
+  const[q,setQ]=useState('');
+  const[index,setIndex]=useState(null);
+  const[status,setStatus]=useState('');
+  const[loading,setLoading]=useState(true);
+  const[preview,setPreview]=useState(null);
+  const[loadingPreview,setLoadingPreview]=useState(false);
+
+  useEffect(()=>{
+    if(!cfg.ghOwner||!cfg.ghRepo){setStatus('Set your GitHub owner and repo name in Settings.');setLoading(false);return;}
+    ghRaw(cfg.ghOwner,cfg.ghRepo,'songs/index.json')
+      .then(txt=>{setIndex(JSON.parse(txt));setLoading(false);})
+      .catch(e=>{setStatus('Could not load global library: '+e.message);setLoading(false);});
+  },[]);
+
+  const results=useMemo(()=>{
+    if(!index)return[];
+    if(!q.trim())return index;
+    const lq=q.toLowerCase();
+    return index.filter(s=>(s.title+' '+s.artist).toLowerCase().includes(lq));
+  },[index,q]);
+
+  const openPreview=async(entry)=>{
+    setLoadingPreview(true);
+    try{
+      const txt=await ghRaw(cfg.ghOwner,cfg.ghRepo,'songs/'+entry.filename);
+      setPreview(JSON.parse(txt));
+    }catch(e){setStatus('Could not load song: '+e.message);}
+    setLoadingPreview(false);
+  };
+
+  if(preview)return(
+    <div style={{padding:'0 20px 24px',display:'flex',flexDirection:'column',gap:14}}>
+      <div style={{display:'flex',alignItems:'center',gap:10}}>
+        <button onClick={()=>setPreview(null)} className="btn-secondary" style={{padding:'6px 12px'}}>← Back</button>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontWeight:700,fontSize:17,color:'var(--text)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{preview.title}</div>
+          <div style={{color:'var(--text-sub)',fontSize:13}}>{preview.artist}</div>
+        </div>
+      </div>
+      <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+        {['Key '+preview.key,preview.capo>0?'Capo '+preview.capo:null,preview.tempo+' bpm'].filter(Boolean).map(t=><span key={t} className="tag">{t}</span>)}
+      </div>
+      <div style={{background:'var(--surface2)',borderRadius:8,border:'1px solid var(--border)',padding:12,maxHeight:220,overflowY:'auto'}}>
+        <pre style={{fontFamily:"'Courier Prime',monospace",fontSize:11,color:'var(--text-sub)',lineHeight:1.6,whiteSpace:'pre-wrap',wordBreak:'break-word'}}>{preview.content.slice(0,600)}{preview.content.length>600?'\n…':''}</pre>
+      </div>
+      <button onClick={()=>{onImport({...preview,id:Date.now(),liked:false,cover:null});onClose();}}
+        className="btn-primary" style={{width:'100%',padding:13,fontSize:15}}>
+        Add to My Library ✓
+      </button>
+    </div>
+  );
+
+  return(
+    <div style={{padding:'0 20px 24px',display:'flex',flexDirection:'column',gap:12}}>
+      <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search by title or artist…" className="inp" autoFocus/>
+      {status&&<div style={{background:'var(--surface2)',borderRadius:8,padding:'10px 12px',color:'var(--danger)',fontSize:13}}>{status}</div>}
+      {loading&&<div style={{display:'flex',gap:8,color:'var(--text-sub)',fontSize:13,alignItems:'center',padding:'12px 0'}}><span className="spinner"/>Loading global library…</div>}
+      {loadingPreview&&<div style={{display:'flex',gap:8,color:'var(--text-sub)',fontSize:13,alignItems:'center'}}><span className="spinner"/>Loading song…</div>}
+      <div style={{display:'flex',flexDirection:'column',gap:6,maxHeight:340,overflowY:'auto'}}>
+        {results.map((entry,i)=>(
+          <button key={i} onClick={()=>openPreview(entry)}
+            style={{display:'flex',alignItems:'center',gap:12,padding:'11px 14px',
+              background:'var(--surface)',border:'1.5px solid var(--border)',borderRadius:10,
+              cursor:'pointer',textAlign:'left',width:'100%'}}>
+            <span style={{fontSize:20,flexShrink:0}}>🎵</span>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontWeight:600,fontSize:15,color:'var(--text)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{entry.title}</div>
+              <div style={{color:'var(--text-sub)',fontSize:12}}>{entry.artist} · Key {entry.key}{entry.capo>0?' · Capo '+entry.capo:''}</div>
+            </div>
+            <span style={{color:'var(--text-ghost)',fontSize:20,flexShrink:0}}>›</span>
+          </button>
+        ))}
+        {index&&results.length===0&&q&&<div style={{color:'var(--text-faint)',fontSize:13,textAlign:'center',padding:'24px 0'}}>No songs match "{q}"</div>}
+        {index&&index.length===0&&!q&&(
+          <div style={{textAlign:'center',padding:'32px 0',color:'var(--text-faint)'}}>
+            <div style={{fontSize:36,marginBottom:10}}>🌐</div>
+            <div style={{fontSize:14,fontFamily:"'Crimson Text',Georgia,serif"}}>Global library is empty.</div>
+            <div style={{fontSize:12,marginTop:4}}>Be the first — open any song and tap "Contribute".</div>
+          </div>
+        )}
+      </div>
+      {index&&<div style={{color:'var(--text-ghost)',fontSize:11,textAlign:'center',paddingTop:4}}>
+        {index.length} song{index.length!==1?'s':''} in global library
+      </div>}
+    </div>
+  );
+}
+
+// ─── NEW SONG SHEET ───────────────────────────────────────────────────────────
+function NewSongSheet({cfg,onClose,onWriteNew,onImport}){
+  const[mode,setMode]=useState(null); // null | 'paste' | 'global'
+  const[raw,setRaw]=useState('');
+  const[preview,setPreview]=useState(null);
+  const[pasteStep,setPasteStep]=useState('paste');
+  const fileRef=useRef();
+
+  // ── Paste tab mode ──
+  if(mode==='paste')return(<>
+    <div className="sheet-overlay" onClick={onClose}/>
+    <div className="sheet" style={{maxHeight:'94dvh'}}>
+      <div className="sheet-handle"/>
+      <div className="sheet-header">
+        <span className="sheet-title">{pasteStep==='paste'?'Paste Tab':'Review'}</span>
+        <button className="sheet-close" onClick={()=>setMode(null)}>✕</button>
+      </div>
+      {pasteStep==='paste'&&(
+        <div style={{padding:'0 20px 20px',display:'flex',flexDirection:'column',gap:14}}>
+          <div style={{color:'var(--text-sub)',fontSize:13,lineHeight:1.5}}>Copy from UltimateGuitar or any tab site. Chords-above-lyrics format auto-converts.</div>
+          <textarea value={raw} onChange={e=>setRaw(e.target.value)}
+            placeholder={"Something In The Orange Chords by Zach Bryan\nKey: G\n\n[Verse 1]\n     Em7                G\nIt'll be fine by dusk light..."}
+            style={{background:'var(--surface2)',border:'1.5px solid var(--border)',borderRadius:10,padding:12,
+              color:'var(--text)',fontFamily:"'Courier Prime',monospace",fontSize:12,resize:'none',
+              outline:'none',lineHeight:1.7,height:210,width:'100%'}}/>
+          <div style={{display:'flex',gap:10}}>
+            <button onClick={()=>setMode(null)} className="btn-secondary" style={{flex:1}}>← Back</button>
+            <button onClick={()=>{if(raw.trim()){setPreview(parseTabImport(raw));setPasteStep('review');}}}
+              className="btn-primary" style={{flex:2,opacity:raw.trim()?1:0.5}}>
+              Parse &amp; Preview →
+            </button>
+          </div>
+        </div>
+      )}
+      {pasteStep==='review'&&preview&&(
+        <div style={{padding:'0 20px 20px',display:'flex',flexDirection:'column',gap:14}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+            {[['Title',preview.title,t=>setPreview(p=>({...p,title:t}))],
+              ['Artist',preview.artist,t=>setPreview(p=>({...p,artist:t}))],
+              ['Key',preview.key,t=>setPreview(p=>({...p,key:t}))],
+              ['Capo',String(preview.capo),t=>setPreview(p=>({...p,capo:+t}))]
+            ].map(([l,v,sv])=>(
+              <div key={l}>
+                <label style={{display:'block',color:'var(--text-faint)',fontSize:10,marginBottom:4,textTransform:'uppercase',letterSpacing:'0.08em'}}>{l}</label>
+                <input className="inp" style={{fontSize:13}} value={v} onChange={e=>sv(e.target.value)}/>
+              </div>
+            ))}
+          </div>
+          <div style={{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:8,padding:10,maxHeight:140,overflowY:'auto'}}>
+            <pre style={{fontFamily:"'Courier Prime',monospace",fontSize:11,color:'var(--text-sub)',lineHeight:1.5,whiteSpace:'pre-wrap',wordBreak:'break-word'}}>
+              {preview.content.slice(0,400)}{preview.content.length>400?'\n…':''}
+            </pre>
+          </div>
+          <div style={{display:'flex',gap:10}}>
+            <button onClick={()=>setPasteStep('paste')} className="btn-secondary" style={{flex:1}}>← Back</button>
+            <button onClick={()=>{onImport({...preview,id:Date.now(),liked:false,cover:null});onClose();}}
+              className="btn-primary" style={{flex:2}}>Add to Library ✓</button>
+          </div>
+        </div>
+      )}
+    </div>
+  </>);
+
+  // ── Global library mode ──
+  if(mode==='global')return(<>
+    <div className="sheet-overlay" onClick={onClose}/>
+    <div className="sheet" style={{maxHeight:'94dvh'}}>
+      <div className="sheet-handle"/>
+      <div className="sheet-header">
+        <span className="sheet-title">🌐 Global Library</span>
+        <button className="sheet-close" onClick={()=>setMode(null)}>✕</button>
+      </div>
+      <GlobalLibrarySearch cfg={cfg} onImport={onImport} onClose={onClose}/>
+    </div>
+  </>);
+
+  // ── Main menu ──
+  return(<>
+    <div className="sheet-overlay" onClick={onClose}/>
+    <div className="sheet">
+      <div className="sheet-handle"/>
+      <div className="sheet-header">
+        <span className="sheet-title">Add Song</span>
+        <button className="sheet-close" onClick={onClose}>✕</button>
+      </div>
+      <div style={{padding:'0 20px 28px',display:'flex',flexDirection:'column',gap:10}}>
+        <input ref={fileRef} type="file" accept=".json,application/json" style={{display:'none'}}
+          onChange={e=>{
+            const file=e.target.files[0];if(!file)return;
+            const reader=new FileReader();
+            reader.onload=ev=>{
+              try{
+                const data=JSON.parse(ev.target.result);
+                const arr=Array.isArray(data)?data:[data];
+                arr.forEach(s=>{if(s.title&&s.content)onImport({...s,id:Date.now()+Math.random(),cover:s.cover||null});});
+                onClose();
+              }catch{alert('Invalid JSON file');}
+            };
+            reader.readAsText(file);e.target.value='';
+          }}/>
+        {[
+          ['✏️','Write from Scratch','Blank editor with chord palette',()=>{onWriteNew();onClose();}],
+          ['📋','Paste from Tab Site','UltimateGuitar, etc — auto-converts',()=>setMode('paste')],
+          ['🌐','Search Global Library','Browse songs shared by all users',()=>setMode('global')],
+          ['📂','Import JSON File','Load a previously exported .json song',()=>fileRef.current.click()],
+        ].map(([icon,title,desc,action])=>(
+          <button key={title} onClick={action}
+            style={{display:'flex',alignItems:'center',gap:14,padding:'14px 16px',
+              background:'var(--surface)',border:'1.5px solid var(--border)',borderRadius:12,
+              cursor:'pointer',textAlign:'left',width:'100%',transition:'background .12s'}}
+            onTouchStart={e=>e.currentTarget.style.background='var(--surface2)'}
+            onTouchEnd={e=>e.currentTarget.style.background='var(--surface)'}>
+            <span style={{fontSize:26,width:32,textAlign:'center',flexShrink:0}}>{icon}</span>
+            <div>
+              <div style={{color:'var(--text)',fontWeight:700,fontSize:15,fontFamily:"'Crimson Text',Georgia,serif"}}>{title}</div>
+              <div style={{color:'var(--text-sub)',fontSize:12,marginTop:1}}>{desc}</div>
+            </div>
+          </button>
+        ))}
+        {(!cfg.ghOwner)&&(
+          <div style={{background:'var(--chord-bg)',border:'1px solid var(--chord-border)',borderRadius:8,padding:'9px 12px',color:'var(--text-sub)',fontSize:12,lineHeight:1.5}}>
+            💡 Add your GitHub username in Settings to unlock the Global Library.
+          </div>
+        )}
+      </div>
+    </div>
+  </>);
+}
+
+// ─── SONG ROW (swipe left to delete) ─────────────────────────────────────────
+function SongRow({song,onSelect,onToggleLike,onDelete}){
+  const[swipeX,setSwipeX]=useState(0);
+  const[confirmDel,setConfirmDel]=useState(false);
+  const startX=useRef(null);
+  const THRESHOLD=55,DELETE_W=72;
+  const onTS=e=>{startX.current=e.touches[0].clientX;};
+  const onTM=e=>{if(startX.current===null)return;const dx=e.touches[0].clientX-startX.current;if(dx<0)setSwipeX(Math.max(dx,-DELETE_W));else if(swipeX<0)setSwipeX(Math.min(0,swipeX+dx*0.5));};
+  const onTE=()=>{startX.current=null;setSwipeX(s=>s<-THRESHOLD?-DELETE_W:0);};
+  const handleDel=e=>{e.stopPropagation();if(confirmDel){onDelete(song.id);}else{setConfirmDel(true);setTimeout(()=>setConfirmDel(false),2500);}};
+  return(
+    <div style={{position:'relative',overflow:'hidden',borderBottom:'1px solid var(--border)'}}>
+      <div style={{position:'absolute',right:0,top:0,bottom:0,width:DELETE_W,
+        background:confirmDel?'#aa1111':'#dd2222',
+        display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',cursor:'pointer',gap:2}}
+        onClick={handleDel}>
+        <span style={{fontSize:18}}>🗑</span>
+        <span style={{color:'#fff',fontSize:11,fontFamily:"'Crimson Text',Georgia,serif",fontWeight:600}}>{confirmDel?'Sure?':'Delete'}</span>
+      </div>
+      <div onClick={()=>{if(swipeX===0)onSelect(song);else setSwipeX(0);}}
+        onTouchStart={onTS} onTouchMove={onTM} onTouchEnd={onTE}
+        style={{display:'flex',alignItems:'center',gap:12,padding:'11px 16px',
+          background:'var(--bg)',transform:`translateX(${swipeX}px)`,
+          transition:startX.current===null?'transform .18s ease':'none'}}>
+        <div style={{width:44,height:44,borderRadius:10,flexShrink:0,overflow:'hidden',
+          background:'var(--surface2)',display:'flex',alignItems:'center',justifyContent:'center',
+          border:'1px solid var(--border)'}}>
+          {song.cover?<img src={song.cover} style={{width:'100%',height:'100%',objectFit:'cover'}}/>:<span style={{fontSize:22}}>🎵</span>}
+        </div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontWeight:600,fontSize:16,color:'var(--text)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{song.title}</div>
+          <div style={{color:'var(--text-sub)',fontSize:12,marginTop:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{song.artist}</div>
+          <div style={{display:'flex',gap:5,marginTop:5,flexWrap:'wrap'}}>
+            {['Key '+song.key,song.capo>0?'Capo '+song.capo:null,song.tempo+' bpm'].filter(Boolean).map(t=><span key={t} className="tag">{t}</span>)}
+          </div>
+        </div>
+        <button onClick={e=>{e.stopPropagation();onToggleLike(song.id);}}
+          style={{background:'none',border:'none',fontSize:22,color:song.liked?'var(--danger)':'var(--text-ghost)',padding:'6px',flexShrink:0,lineHeight:1}}>
+          {song.liked?'♥':'♡'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── HOME PAGE ─────────────────────────────────────────────────────────────────
+function HomePage({songs,onSelect,onToggleLike,onDelete,onNew}){
+  const[search,setSearch]=useState('');
+  const[tab,setTab]=useState('fav');
+  const filt=songs.filter(s=>(s.title+' '+s.artist).toLowerCase().includes(search.toLowerCase()));
+  const shown=tab==='fav'?filt.filter(s=>s.liked):filt;
+  return(
+    <div style={{display:'flex',flexDirection:'column',height:'100%',background:'var(--bg)'}}>
+      <div style={{background:'var(--header-bg)',borderBottom:'1px solid var(--border)',
+        padding:'16px 18px 12px',paddingTop:'calc(16px + env(safe-area-inset-top,0px))'}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+          <div>
+            <div style={{fontSize:26,fontWeight:700,color:'var(--text)',lineHeight:1,fontFamily:"'Crimson Text',Georgia,serif"}}>🎸 TabIt</div>
+            <div style={{color:'var(--text-faint)',fontSize:12,marginTop:2}}>Your guitar songbook</div>
+          </div>
+          <button onClick={onNew} className="btn-primary" style={{fontSize:14,padding:'9px 16px'}}>+ New</button>
+        </div>
+        <div style={{position:'relative',marginBottom:10}}>
+          <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text-faint)',fontSize:15,pointerEvents:'none'}}>⌕</span>
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search songs or artists…"
+            className="inp" style={{paddingLeft:34,fontSize:14}}/>
+        </div>
+        <div style={{display:'flex',gap:6}}>
+          {[['fav','♥ Favorites'],['all','All Songs']].map(([t,l])=>(
+            <button key={t} onClick={()=>setTab(t)}
+              style={{flex:1,padding:'7px 0',borderRadius:8,border:'none',
+                fontFamily:"'Crimson Text',Georgia,serif",fontSize:13,fontWeight:700,cursor:'pointer',
+                background:tab===t?'var(--accent)':'var(--surface2)',
+                color:tab===t?'var(--accent-text)':'var(--text-sub)'}}>
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div style={{flex:1,overflowY:'auto'}}>
+        {shown.length===0&&(
+          <div style={{textAlign:'center',padding:'60px 24px',color:'var(--text-faint)'}}>
+            <div style={{fontSize:40,marginBottom:12}}>{tab==='fav'?'♡':'♪'}</div>
+            <div style={{fontSize:15,fontFamily:"'Crimson Text',Georgia,serif",color:'var(--text-sub)'}}>
+              {tab==='fav'?'No favorites yet. Tap ♡ on any song.':'No songs match.'}
+            </div>
+          </div>
+        )}
+        {shown.map(song=><SongRow key={song.id} song={song} onSelect={onSelect} onToggleLike={onToggleLike} onDelete={onDelete}/>)}
+        {shown.length>0&&<div style={{textAlign:'center',color:'var(--text-ghost)',fontSize:11,padding:'10px 0 4px'}}>← swipe left to delete</div>}
+        <div style={{height:80}}/>
+      </div>
+    </div>
+  );
+}
+
+// ─── SONG VIEW ─────────────────────────────────────────────────────────────────
+function SongView({song,cfg,onBack,onEdit,onToggleLike,onContribute}){
+  const[activeChord,setActiveChord]=useState(null);
+  const[semitones,setSemitones]=useState(0);
+  const[showCircle,setShowCircle]=useState(false);
+  const[scrolling,setScrolling]=useState(false);
+  const[speed,setSpeed]=useState(40);
+  const[fontSize,setFontSize]=useState(16);
+  const[capo,setCapo]=useState(song.capo); // local only — resets on exit
+  const[showControls,setShowControls]=useState(true);
+  const[contributeMsg,setContributeMsg]=useState('');
+  const[contributing,setContributing]=useState(false);
+  const scrollRef=useRef(null);
+  const animRef=useRef(null);
+  const speedRef=useRef(speed);
+  const scrollAcc=useRef(0);
+  const swipeStartX=useRef(null);
+  const swipeStartY=useRef(null);
+  const[swipeProg,setSwipeProg]=useState(0);
+  speedRef.current=speed;
+
+  useEffect(()=>{setCapo(song.capo);setSemitones(0);scrollAcc.current=0;setScrolling(false);},[song.id]);
+  const scroll=useCallback(()=>{
+    if(scrollRef.current){
+      scrollAcc.current+=speedRef.current/60;
+      const px=Math.floor(scrollAcc.current);
+      if(px>=1){scrollRef.current.scrollTop+=px;scrollAcc.current-=px;}
+      const{scrollTop,scrollHeight,clientHeight}=scrollRef.current;
+      if(scrollTop+clientHeight>=scrollHeight-4){setScrolling(false);scrollAcc.current=0;return;}
+    }
+    animRef.current=requestAnimationFrame(scroll);
+  },[]);
+  useEffect(()=>{
+    if(scrolling)animRef.current=requestAnimationFrame(scroll);
+    else cancelAnimationFrame(animRef.current);
+    return()=>cancelAnimationFrame(animRef.current);
+  },[scrolling,scroll]);
+
+  const onSwipeStart=useCallback(e=>{
+    const t=e.touches[0];
+    if(t.clientX<38){swipeStartX.current=t.clientX;swipeStartY.current=t.clientY;}
+    else swipeStartX.current=null;
+  },[]);
+  const onSwipeMove=useCallback(e=>{
+    if(swipeStartX.current===null)return;
+    const dx=e.touches[0].clientX-swipeStartX.current;
+    const dy=Math.abs(e.touches[0].clientY-swipeStartY.current);
+    if(dy>dx*1.5){swipeStartX.current=null;setSwipeProg(0);return;}
+    if(dx>0)setSwipeProg(Math.min(dx/85,1));
+  },[]);
+  const onSwipeEnd=useCallback(()=>{
+    if(swipeStartX.current!==null&&swipeProg>=0.45)onBack();
+    swipeStartX.current=null;setSwipeProg(0);
+  },[swipeProg,onBack]);
+
+  const handleContribute=async()=>{
+    setContributing(true);setContributeMsg('Uploading…');
+    try{await onContribute(song);setContributeMsg('✅ Added to global library!');}
+    catch(e){setContributeMsg('❌ '+e.message);}
+    setContributing(false);
+    setTimeout(()=>setContributeMsg(''),5000);
+  };
+
+  const displayKey=txChord(song.key,semitones,FLAT_SEMS.has(((n2s(song.key)+semitones)%12+12)%12));
+  const canContribute=!!(cfg.ghToken&&cfg.ghOwner&&cfg.ghRepo);
+
+  return(
+    <div style={{height:'100%',display:'flex',flexDirection:'column',background:'var(--bg)'}}
+      onTouchStart={onSwipeStart} onTouchMove={onSwipeMove} onTouchEnd={onSwipeEnd}>
+      {swipeProg>0.05&&<div style={{position:'fixed',top:0,left:0,bottom:0,width:3,background:'var(--accent)',opacity:swipeProg,zIndex:999,borderRadius:'0 2px 2px 0'}}/>}
+      {activeChord&&<ChordSheet chordName={activeChord} capo={capo} onClose={()=>setActiveChord(null)}/>}
+      {showCircle&&<CircleOfFifths originalKey={song.key} semitones={semitones} onChange={setSemitones} onClose={()=>setShowCircle(false)}/>}
+
+      {/* Header */}
+      <div style={{background:'var(--header-bg)',borderBottom:'1px solid var(--border)',
+        padding:'10px 14px',paddingTop:'calc(10px + env(safe-area-inset-top,0px))',
+        display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
+        <button onClick={onBack} className="btn-secondary tap" style={{padding:'6px 12px',fontSize:16}}>‹</button>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontWeight:700,fontSize:16,color:'var(--text)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontFamily:"'Crimson Text',Georgia,serif"}}>{song.title}</div>
+          <div style={{color:'var(--text-sub)',fontSize:11,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+            {song.artist} · Key {displayKey}{semitones?` (orig. ${song.key})`:''}{capo>0?` · Capo ${capo}`:''}
+          </div>
+        </div>
+        <button onClick={()=>onToggleLike(song.id)} style={{background:'none',border:'none',fontSize:22,color:song.liked?'var(--danger)':'var(--text-ghost)',padding:'4px',lineHeight:1,flexShrink:0}}>
+          {song.liked?'♥':'♡'}
+        </button>
+        <button onClick={onEdit} className="btn-secondary" style={{fontSize:13,padding:'6px 12px',flexShrink:0}}>Edit</button>
+      </div>
+
+      {/* Controls */}
+      {showControls&&(
+        <div style={{background:'var(--surface)',borderBottom:'1px solid var(--border)',padding:'8px 14px',flexShrink:0,display:'flex',flexDirection:'column',gap:7}}>
+          <div style={{display:'flex',alignItems:'center',gap:7,flexWrap:'wrap'}}>
+            <button onClick={()=>setScrolling(s=>!s)}
+              style={{background:scrolling?'#cc2222':'var(--accent)',border:'none',borderRadius:7,
+                padding:'7px 14px',color:'var(--accent-text)',fontWeight:700,fontSize:13,
+                fontFamily:"'Crimson Text',Georgia,serif",cursor:'pointer',flexShrink:0}}>
+              {scrolling?'⏸ Pause':'▶ Scroll'}
+            </button>
+            {scrolling
+              ?<input type="range" min={2} max={120} value={speed} onChange={e=>setSpeed(+e.target.value)} style={{flex:1,accentColor:'var(--accent)',minWidth:60}}/>
+              :<>
+                <button onClick={()=>setFontSize(f=>Math.max(11,f-1))} className="btn-ctrl tap" title="Smaller">🔍−</button>
+                <button onClick={()=>setFontSize(f=>Math.min(26,f+1))} className="btn-ctrl tap" title="Larger">🔍+</button>
+                <button onClick={()=>setShowCircle(true)} className="btn-ctrl tap"
+                  style={{color:semitones?'var(--chord)':'var(--text-sub)',borderColor:semitones?'var(--chord-border)':'var(--border)'}}>
+                  ♩{semitones?(semitones>0?` +${semitones}`:` ${semitones}`):''}
+                </button>
+                <select value={capo} onChange={e=>setCapo(+e.target.value)}
+                  style={{background:'var(--surface)',border:'1.5px solid var(--border)',borderRadius:7,
+                    color:capo>0?'var(--chord)':'var(--text-sub)',fontSize:12,padding:'5px 8px',
+                    outline:'none',fontFamily:"'Crimson Text',Georgia,serif"}}>
+                  <option value={0}>Capo: None</option>
+                  {Array.from({length:12},(_,i)=><option key={i+1} value={i+1}>Capo {i+1}</option>)}
+                </select>
+              </>
+            }
+          </div>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
+            <div style={{color:'var(--text-faint)',fontSize:10}}>Tap chord for diagram · tap lyrics to hide controls</div>
+            {canContribute&&(
+              <button onClick={handleContribute} disabled={contributing}
+                style={{background:'none',border:'1px solid var(--chord-border)',borderRadius:6,
+                  color:'var(--chord)',fontSize:11,padding:'3px 9px',cursor:'pointer',
+                  fontFamily:"'Crimson Text',Georgia,serif",opacity:contributing?0.6:1,flexShrink:0,
+                  display:'flex',alignItems:'center',gap:4,whiteSpace:'nowrap'}}>
+                {contributing&&<span className="spinner" style={{width:10,height:10}}/>}
+                🌐 Contribute
+              </button>
+            )}
+          </div>
+          {contributeMsg&&(
+            <div style={{fontSize:12,color:contributeMsg.startsWith('✅')?'#1a7a3a':contributeMsg.startsWith('❌')?'var(--danger)':'var(--text-sub)',fontWeight:600}}>
+              {contributeMsg}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Song content */}
+      <div ref={scrollRef} onClick={()=>setShowControls(s=>!s)}
+        style={{flex:1,overflowY:'auto',overflowX:'hidden',padding:'18px 18px calc(env(safe-area-inset-bottom,0px) + 20px)',WebkitOverflowScrolling:'touch'}}>
+        {song.cover&&<img src={song.cover} style={{width:'100%',maxHeight:180,objectFit:'cover',borderRadius:10,marginBottom:16,display:'block'}}/>}
+        {song.content.split('\n').map((line,i)=>(
+          <SongLine key={i} line={line} onChordClick={setActiveChord} semitones={semitones} fontSize={fontSize}/>
+        ))}
+        <div style={{height:40}}/>
+      </div>
+    </div>
+  );
+}
+
+// ─── SONG EDITOR ──────────────────────────────────────────────────────────────
+const PALETTE=[...new Set(['C','D','E','F','G','A','B','Am','Em','Dm','Bm','Cm','F#m','C#m','G7','D7','A7','E7','Am7','Em7','Dm7','Cmaj7','Gmaj7','Cadd9','Dsus4','Asus4','Gsus4','Bb','Eb','Ab','F#','Db','D/F#',...Object.keys(CV)])];
+const KEYS=['C','C#','D','Eb','E','F','F#','G','Ab','A','Bb','B','Am','Em','Dm','Bm'];
+
+function SongEditor({song,onSave,onBack,onDelete}){
+  const[title,setTitle]=useState(song?.title||'');
+  const[artist,setArtist]=useState(song?.artist||'');
+  const[key,setKey]=useState(song?.key||'G');
+  const[capo,setCapo]=useState(song?.capo??0);
+  const[tempo,setTempo]=useState(song?.tempo||120);
+  const[content,setContent]=useState(song?.content||'');
+  const[cover,setCover]=useState(song?.cover||null);
+  const[eTab,setETab]=useState('write');
+  const[activeChord,setActiveChord]=useState(null);
+  const taRef=useRef(),imgRef=useRef();
+
+  const insertChord=chord=>{
+    const ta=taRef.current;if(!ta)return;
+    const{selectionStart:s,selectionEnd:e}=ta;
+    const next=content.slice(0,s)+`[${chord}]`+content.slice(e);
+    setContent(next);
+    setTimeout(()=>{ta.setSelectionRange(s+chord.length+2,s+chord.length+2);ta.focus();},0);
+  };
+  const handleSave=()=>{
+    if(!title.trim()){alert('Please add a title');return;}
+    onSave({id:song?.id||Date.now(),title:title.trim(),artist:artist.trim(),key,capo,tempo,content,liked:song?.liked??false,cover});
+  };
+
+  return(
+    <div style={{height:'100%',display:'flex',flexDirection:'column',background:'var(--bg)'}}>
+      {activeChord&&<ChordSheet chordName={activeChord} capo={capo} onClose={()=>setActiveChord(null)}/>}
+      {/* Header */}
+      <div style={{background:'var(--header-bg)',borderBottom:'1px solid var(--border)',
+        padding:'10px 14px',paddingTop:'calc(10px + env(safe-area-inset-top,0px))',
+        display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
+        <button onClick={onBack} className="btn-secondary tap" style={{padding:'6px 12px',fontSize:16}}>‹</button>
+        <h2 style={{flex:1,fontSize:18,fontWeight:700,color:'var(--text)',fontFamily:"'Crimson Text',Georgia,serif"}}>{song?'Edit Song':'New Song'}</h2>
+        {song&&onDelete&&(
+          <button onClick={()=>{if(window.confirm(`Delete "${song.title}"?`))onDelete(song.id);}}
+            style={{background:'none',border:'none',color:'var(--danger)',fontSize:18,padding:'4px 6px'}}>🗑</button>
+        )}
+        <button onClick={handleSave} className="btn-primary" style={{fontSize:14,padding:'8px 16px'}}>{song?'Save':'Add'}</button>
+      </div>
+      {/* Tab strip */}
+      <div style={{display:'flex',background:'var(--surface)',borderBottom:'1px solid var(--border)',flexShrink:0}}>
+        {[['write','Write'],['details','Details'],['cover','Cover'],['preview','Preview']].map(([t,l])=>(
+          <button key={t} onClick={()=>setETab(t)}
+            style={{flex:1,padding:'9px 0',background:'transparent',border:'none',
+              borderBottom:eTab===t?`2px solid var(--accent)`:'2px solid transparent',
+              color:eTab===t?'var(--accent)':'var(--text-faint)',
+              fontFamily:"'Crimson Text',Georgia,serif",fontSize:13,fontWeight:eTab===t?700:400,cursor:'pointer'}}>
+            {l}
+          </button>
+        ))}
+      </div>
+      {eTab==='write'&&(
+        <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+          <div style={{background:'var(--surface2)',borderBottom:'1px solid var(--border)',overflowX:'auto',WebkitOverflowScrolling:'touch',flexShrink:0}}>
+            <div style={{display:'flex',gap:5,padding:'8px 12px',width:'max-content'}}>
+              {PALETTE.map(c=>(
+                <button key={c} onClick={()=>insertChord(c)}
+                  style={{background:'var(--chord-bg)',border:'1px solid var(--chord-border)',borderRadius:5,
+                    padding:'4px 8px',color:'var(--chord)',cursor:'pointer',fontSize:12,
+                    whiteSpace:'nowrap',fontFamily:"'Crimson Text',Georgia,serif",fontWeight:700}}>{c}</button>
+              ))}
+            </div>
+          </div>
+          <textarea ref={taRef} value={content} onChange={e=>setContent(e.target.value)} spellCheck={false}
+            placeholder={"[Verse 1]\n[G]Mama, take this [D]badge off of [Am]me\n\n[Chorus]\n[G]Knockin' on heaven's [D]door"}
+            style={{flex:1,background:'var(--bg)',border:'none',padding:'14px 16px',color:'var(--text)',
+              fontFamily:"'Courier Prime','Courier New',monospace",fontSize:14,resize:'none',outline:'none',lineHeight:1.8}}/>
+        </div>
+      )}
+      {eTab==='details'&&(
+        <div style={{flex:1,overflowY:'auto'}}>
+          {[['Title',title,setTitle,'text','Song title'],['Artist',artist,setArtist,'text','Artist name']].map(([l,v,sv,t,ph])=>(
+            <div key={l} style={{padding:'12px 18px',borderBottom:'1px solid var(--surface2)'}}>
+              <label style={{display:'block',color:'var(--text-faint)',fontSize:10,marginBottom:6,textTransform:'uppercase',letterSpacing:'0.1em'}}>{l}</label>
+              <input value={v} onChange={e=>sv(e.target.value)} type={t} placeholder={ph} className="inp"/>
+            </div>
+          ))}
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr'}}>
+            <div style={{padding:'12px 18px',borderBottom:'1px solid var(--surface2)',borderRight:'1px solid var(--surface2)'}}>
+              <label style={{display:'block',color:'var(--text-faint)',fontSize:10,marginBottom:6,textTransform:'uppercase',letterSpacing:'0.1em'}}>Key</label>
+              <select value={key} onChange={e=>setKey(e.target.value)} className="inp" style={{appearance:'none',fontSize:14}}>{KEYS.map(k=><option key={k} value={k}>{k}</option>)}</select>
+            </div>
+            <div style={{padding:'12px 18px',borderBottom:'1px solid var(--surface2)'}}>
+              <label style={{display:'block',color:'var(--text-faint)',fontSize:10,marginBottom:6,textTransform:'uppercase',letterSpacing:'0.1em'}}>Capo</label>
+              <select value={capo} onChange={e=>setCapo(+e.target.value)} className="inp" style={{appearance:'none',fontSize:14}}>
+                <option value={0}>None</option>
+                {Array.from({length:12},(_,i)=><option key={i+1} value={i+1}>Fret {i+1}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{padding:'12px 18px'}}>
+            <label style={{display:'block',color:'var(--text-faint)',fontSize:10,marginBottom:8,textTransform:'uppercase',letterSpacing:'0.1em'}}>Tempo: {tempo} BPM</label>
+            <input type="range" min={40} max={240} value={tempo} onChange={e=>setTempo(+e.target.value)} style={{width:'100%',accentColor:'var(--accent)'}}/>
+          </div>
+        </div>
+      )}
+      {eTab==='cover'&&(
+        <div style={{flex:1,overflowY:'auto',padding:'20px 18px',display:'flex',flexDirection:'column',gap:16}}>
+          <input ref={imgRef} type="file" accept="image/*" style={{display:'none'}}
+            onChange={e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>setCover(ev.target.result);r.readAsDataURL(f);e.target.value='';}}/>
+          {cover
+            ?<img src={cover} style={{width:'100%',maxHeight:220,objectFit:'cover',borderRadius:12,border:'1px solid var(--border)'}}/>
+            :<div style={{width:'100%',height:160,background:'var(--surface2)',borderRadius:12,border:'2px dashed var(--border)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:8,color:'var(--text-faint)'}}>
+              <span style={{fontSize:40}}>🖼</span><span style={{fontSize:13}}>No album cover</span>
+            </div>}
+          <div style={{display:'flex',gap:10}}>
+            <button onClick={()=>imgRef.current.click()} className="btn-primary" style={{flex:1}}>{cover?'Change':'Add Cover'}</button>
+            {cover&&<button onClick={()=>setCover(null)} className="btn-secondary" style={{flex:1}}>Remove</button>}
+          </div>
+          <div style={{color:'var(--text-faint)',fontSize:12,textAlign:'center',lineHeight:1.5}}>
+            Cover shows in your library and at the top of the song view.<br/>Note: covers are not uploaded to the global library.
+          </div>
+        </div>
+      )}
+      {eTab==='preview'&&(
+        <div style={{flex:1,overflowY:'auto',overflowX:'hidden',padding:'20px 16px 40px'}}>
+          {cover&&<img src={cover} style={{width:'100%',maxHeight:160,objectFit:'cover',borderRadius:10,marginBottom:14,display:'block'}}/>}
+          <div style={{fontFamily:"'Crimson Text',Georgia,serif",fontSize:22,fontWeight:700,color:'var(--text)',marginBottom:3}}>{title||'Untitled'}</div>
+          <div style={{color:'var(--text-faint)',fontSize:12,marginBottom:18}}>{artist||'Unknown'} · Key {key}{capo>0?` · Capo ${capo}`:''}</div>
+          {content.split('\n').map((line,i)=><SongLine key={i} line={line} onChordClick={setActiveChord} semitones={0} fontSize={14}/>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── CHORD BROWSER ────────────────────────────────────────────────────────────
+const BROWSE_GROUPS=[
+  ['Major',['C','D','E','F','G','A','B','Bb','Eb','Ab','F#','Db']],
+  ['Minor',['Am','Bm','Cm','Dm','Em','F#m','C#m','G#m']],
+  ['7th',['G7','D7','A7','E7','B7','Am7','Em7','Dm7']],
+  ['Major 7',['Cmaj7','Gmaj7','Fmaj7']],
+  ['Sus / Add',['Dsus4','Asus4','Gsus4','Cadd9']],
+];
+function BrowseView(){
+  const[activeChord,setActiveChord]=useState(null);
+  return(
+    <div style={{height:'100%',display:'flex',flexDirection:'column',background:'var(--bg)'}}>
+      {activeChord&&<ChordSheet chordName={activeChord} capo={0} onClose={()=>setActiveChord(null)}/>}
+      <div style={{background:'var(--header-bg)',borderBottom:'1px solid var(--border)',
+        padding:'16px 18px 14px',paddingTop:'calc(16px + env(safe-area-inset-top,0px))'}}>
+        <div style={{fontSize:22,fontWeight:700,color:'var(--text)',fontFamily:"'Crimson Text',Georgia,serif"}}>Chord Reference</div>
+        <div style={{color:'var(--text-faint)',fontSize:12,marginTop:2}}>Tap any chord for fingering diagram</div>
+      </div>
+      <div style={{flex:1,overflowY:'auto',padding:'10px 14px 80px'}}>
+        {BROWSE_GROUPS.map(([section,chords])=>(
+          <div key={section} style={{marginBottom:22}}>
+            <div className="section-lbl">{section}</div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:7}}>
+              {chords.map(c=>(
+                <button key={c} onClick={()=>setActiveChord(c)}
+                  style={{background:'var(--surface)',border:'1.5px solid var(--border)',borderRadius:10,
+                    padding:'10px 4px',display:'flex',flexDirection:'column',alignItems:'center',gap:3,cursor:'pointer'}}>
+                  <span style={{color:'var(--chord)',fontWeight:700,fontSize:17,fontFamily:"'Crimson Text',Georgia,serif"}}>{c}</span>
+                  <span style={{color:'var(--text-ghost)',fontSize:9}}>{getVoicings(c)?getVoicings(c)[0].lbl:'—'}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── SETTINGS VIEW ─────────────────────────────────────────────────────────────
+function SettingsView({songs,cfg,onCfgChange,onReplace}){
+  const[theme,setThemeState]=useState(getStoredTheme);
+  const[localCfg,setLocalCfg]=useState(cfg);
+  const[syncStatus,setSyncStatus]=useState('');
+  const[loading,setLoading]=useState(false);
+
+  const updateCfg=patch=>{const next={...localCfg,...patch};setLocalCfg(next);onCfgChange(next);};
+  const changeTheme=id=>{setThemeState(id);applyTheme(id);};
+
+  const pushGist=async()=>{
+    if(!localCfg.ghToken){setSyncStatus('❌ Enter your GitHub token first.');return;}
+    setLoading(true);setSyncStatus('');
+    try{
+      const content=JSON.stringify(songs,null,2);
+      let gistId=localCfg.ghGistId;
+      if(!gistId){
+        gistId=await ghCreateGist(localCfg.ghToken,content);
+        updateCfg({ghGistId:gistId,lastSync:new Date().toLocaleString()});
+        setSyncStatus(`✅ Created private gist and pushed ${songs.length} songs. Gist ID saved.`);
+      }else{
+        await ghUpdateGist(localCfg.ghToken,gistId,content);
+        updateCfg({lastSync:new Date().toLocaleString()});
+        setSyncStatus(`✅ Pushed ${songs.length} songs to your gist.`);
+      }
+    }catch(e){setSyncStatus('❌ '+e.message);}
+    setLoading(false);
+  };
+
+  const pullGist=async()=>{
+    if(!localCfg.ghToken){setSyncStatus('❌ Enter your GitHub token first.');return;}
+    if(!localCfg.ghGistId){setSyncStatus('❌ No gist ID saved. Push first to create one, or paste a Gist ID.');return;}
+    setLoading(true);setSyncStatus('');
+    try{
+      const content=await ghGetGist(localCfg.ghToken,localCfg.ghGistId);
+      const parsed=JSON.parse(content);
+      if(!Array.isArray(parsed)){setSyncStatus('❌ Gist content is not a song array.');setLoading(false);return;}
+      if(window.confirm(`Replace your ${songs.length} local songs with ${parsed.length} from gist?`)){
+        onReplace(parsed);
+        updateCfg({lastSync:new Date().toLocaleString()});
+        setSyncStatus(`✅ Pulled ${parsed.length} songs.`);
+      }else setSyncStatus('Cancelled.');
+    }catch(e){setSyncStatus('❌ '+e.message);}
+    setLoading(false);
+  };
+
+  const statusColor=syncStatus.startsWith('✅')?'#1a7a3a':syncStatus.startsWith('❌')?'var(--danger)':'var(--text-sub)';
+
+  return(
+    <div style={{height:'100%',display:'flex',flexDirection:'column',background:'var(--bg)'}}>
+      <div style={{background:'var(--header-bg)',borderBottom:'1px solid var(--border)',
+        padding:'16px 18px 14px',paddingTop:'calc(16px + env(safe-area-inset-top,0px))'}}>
+        <div style={{fontSize:22,fontWeight:700,color:'var(--text)',fontFamily:"'Crimson Text',Georgia,serif"}}>⚙ Settings</div>
+        <div style={{color:'var(--text-faint)',fontSize:12,marginTop:2}}>Theme, sync &amp; GitHub</div>
+      </div>
+      <div style={{flex:1,overflowY:'auto',padding:'16px 18px 80px',display:'flex',flexDirection:'column',gap:24}}>
+
+        {/* Theme */}
+        <div>
+          <div className="section-lbl">Theme</div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+            {THEMES.map(t=>{const active=theme===t.id;return(
+              <button key={t.id} onClick={()=>changeTheme(t.id)}
+                style={{background:active?'var(--chord-bg)':'var(--surface)',
+                  border:`2px solid ${active?'var(--accent)':'var(--border)'}`,
+                  borderRadius:12,padding:'12px 14px',cursor:'pointer',textAlign:'left',display:'flex',flexDirection:'column',gap:5}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <span style={{fontSize:20}}>{t.emoji}</span>
+                  {active&&<span style={{color:'var(--accent)',fontWeight:700}}>✓</span>}
+                </div>
+                <div style={{color:'var(--text)',fontWeight:700,fontSize:14,fontFamily:"'Crimson Text',Georgia,serif"}}>{t.name}</div>
+                <div style={{color:'var(--text-sub)',fontSize:11}}>{t.desc}</div>
+              </button>
+            );})}
+          </div>
+        </div>
+
+        {/* GitHub Config */}
+        <div>
+          <div className="section-lbl">GitHub Setup</div>
+          <div style={{background:'var(--surface)',borderRadius:12,border:'1px solid var(--border)',padding:'13px 15px',marginBottom:14,color:'var(--text-sub)',fontSize:13,lineHeight:1.7}}>
+            Connect your GitHub account to enable <strong style={{color:'var(--text)'}}>personal sync</strong> via private Gist and <strong style={{color:'var(--text)'}}>global library</strong> search &amp; contribute.
+          </div>
+          {[
+            ['GitHub Token (PAT)', 'ghToken', 'password', 'ghp_xxxxxxxxxxxxxxxxxxxx',
+             'github.com/settings/tokens → generate classic token with repo + gist scopes'],
+            ['Your GitHub Username', 'ghOwner', 'text', 'your-username',
+             'Used to read & write the global songs/ library in your repo'],
+            ['Repo Name', 'ghRepo', 'text', 'tabit',
+             'The GitHub repository where this app lives'],
+          ].map(([label,field,type,ph,hint])=>(
+            <div key={field} style={{marginBottom:14}}>
+              <label style={{display:'block',color:'var(--text-faint)',fontSize:10,marginBottom:5,textTransform:'uppercase',letterSpacing:'0.1em'}}>{label}</label>
+              <input value={localCfg[field]||''} onChange={e=>updateCfg({[field]:e.target.value})}
+                type={type} placeholder={ph} className="inp" style={{fontSize:14}}/>
+              <div style={{color:'var(--text-ghost)',fontSize:11,marginTop:3}}>{hint}</div>
+            </div>
+          ))}
+          {localCfg.ghGistId&&(
+            <div style={{background:'var(--surface2)',borderRadius:8,border:'1px solid var(--border)',padding:'8px 12px',marginBottom:6,fontSize:12}}>
+              <span style={{color:'var(--text-sub)'}}>Gist ID: </span>
+              <span style={{fontFamily:'monospace',color:'var(--text)',wordBreak:'break-all'}}>{localCfg.ghGistId}</span>
+              <button onClick={()=>updateCfg({ghGistId:''})} style={{marginLeft:8,background:'none',border:'none',color:'var(--danger)',fontSize:11,cursor:'pointer',verticalAlign:'middle'}}>clear</button>
+            </div>
+          )}
+        </div>
+
+        {/* Gist sync */}
+        <div>
+          <div className="section-lbl">Personal Sync (Private Gist)</div>
+          <div style={{color:'var(--text-sub)',fontSize:13,lineHeight:1.5,marginBottom:12}}>
+            Your library is saved in a private GitHub Gist — only you can see it. Push to back up, Pull to restore on another device.
+          </div>
+          <div style={{display:'flex',gap:10,marginBottom:10}}>
+            <button onClick={pushGist} disabled={loading}
+              style={{flex:1,padding:'12px',background:'var(--accent)',border:'none',borderRadius:10,
+                color:'var(--accent-text)',fontWeight:700,fontSize:14,
+                fontFamily:"'Crimson Text',Georgia,serif",cursor:'pointer',
+                opacity:loading?0.6:1,display:'flex',alignItems:'center',justifyContent:'center',gap:6}}>
+              {loading&&<span className="spinner"/>}⬆ Push Up
+            </button>
+            <button onClick={pullGist} disabled={loading}
+              style={{flex:1,padding:'12px',background:'var(--surface)',border:'1.5px solid var(--border)',borderRadius:10,
+                color:'var(--chord)',fontWeight:700,fontSize:14,
+                fontFamily:"'Crimson Text',Georgia,serif",cursor:'pointer',
+                opacity:loading?0.6:1,display:'flex',alignItems:'center',justifyContent:'center',gap:6}}>
+              {loading&&<span className="spinner"/>}⬇ Pull Down
+            </button>
+          </div>
+          {syncStatus&&(
+            <div style={{padding:'10px 14px',background:'var(--surface)',border:'1px solid var(--border)',borderRadius:8,color:statusColor,fontSize:13,fontWeight:600}}>
+              {syncStatus}
+            </div>
+          )}
+          {localCfg.lastSync&&<div style={{color:'var(--text-faint)',fontSize:11,textAlign:'center',marginTop:8}}>Last synced: {localCfg.lastSync}</div>}
+        </div>
+
+        <div style={{borderTop:'1px solid var(--border)',paddingTop:14,textAlign:'center',color:'var(--text-faint)',fontSize:12}}>
+          TabIt · {songs.length} song{songs.length!==1?'s':''} in library
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── INIT SONGS ───────────────────────────────────────────────────────────────
+const INIT_SONGS=[
+  {id:1,liked:true,key:"G",capo:0,tempo:72,title:"Knockin' on Heaven's Door",artist:"Bob Dylan",cover:null,content:"[Verse 1]\n[G]Mama, take this [D]badge off of [Am]me\n[G]I can't use it [D]anymore [Am]\n\n[G]It's gettin' dark, [D]too dark to [Am]see\n[G]I feel I'm knockin' [D]on heaven's [Am]door\n\n[Chorus]\n[G]Knock, knock, knockin' on heaven's [D]door [Am]\n[G]Knock, knock, knockin' on heaven's [D]door [Am]"},
+  {id:2,liked:true,key:"G",capo:2,tempo:87,title:"Wonderwall",artist:"Oasis",cover:null,content:"[Verse 1]\n[Em7]Today is gonna be the [G]day\n[Dsus4]That they're gonna throw it back to [Am7]you\n\n[Em7]By now you should've somehow\n[G]Realized what you gotta [Dsus4]do [Am7]\n\n[Chorus]\n[Dsus4]Maybe [Cadd9]\nYou're gonna be the one that [Em7]saves me\n[Dsus4]And after [Cadd9]all\nYou're my wonder[Em7]wall"},
+  {id:3,liked:true,key:"D",capo:0,tempo:72,title:"If We Were Vampires",artist:"Jason Isbell",cover:null,content:"[Verse 1]\n[D]It's not the long face\n[A]Pressed in your hands\n\n[Bm]It's not the fight we had\n[G]When we didn't understand\n\n[Chorus]\n[D]If we were vampires\n[A]And death was a joke\n\n[Bm]We'd go out on the sidewalk\n[G]And smoke\n\n[D]I don't have to live forever\n[G]I just want to while I [D]can"},
+  {id:4,liked:true,key:"G",capo:0,tempo:88,title:"Look at Miss Ohio",artist:"Gillian Welch",cover:null,content:"[Verse 1]\n[G]I want to do right\n[D]But not right now\n\n[C]She's singing [G]oh-oh-oh-oh-oh\n\n[Chorus]\n[G]Look at Miss [D]Ohio\nShe's [G]running around with her [C]rag-top down\n\nShe says [G]I want to do right\nBut [D]not right [G]now"},
+  {id:5,liked:false,key:"G",capo:0,tempo:100,title:"Something in the Orange",artist:"Zach Bryan",cover:null,content:"[Verse 1]\n[Em7]It'll be fine by dusk light\n[D/F#]I'm telling you [G]baby\n\n[Em7]These things eat at your bones\n[D/F#]Drive your young mind [Em7]crazy\n\n[Chorus]\n[Cadd9]To you I'm just a man\n[G]To me you're all I am\n\n[D]Where the hell am I supposed to [Em7]go?\n\n[Cadd9]I poisoned myself again\n[G]Something in the orange tells me\n[D]You're never coming [Em7]home"},
+];
+
+// ─── APP ──────────────────────────────────────────────────────────────────────
+function App(){
+  const[songs,setSongs]=useState(loadSongs);
+  const[cfg,setCfg]=useState(loadCfg);
+  const[view,setView]=useState('home');
+  const[selected,setSelected]=useState(null);
+  const[editing,setEditing]=useState(null);
+  const[mainTab,setMainTab]=useState('library');
+  const[showNewSheet,setShowNewSheet]=useState(false);
+
+  useEffect(()=>{applyTheme(getStoredTheme());},[]);
+  useEffect(()=>saveSongs(songs),[songs]);
+
+  const updSong=(id,patch)=>setSongs(ss=>ss.map(s=>s.id===id?{...s,...patch}:s));
+  const delSong=id=>{setSongs(ss=>ss.filter(s=>s.id!==id));if(selected?.id===id){setSelected(null);setView('home');}};
+  const handleCfgChange=next=>{setCfg(next);saveCfg(next);};
+
+  // Contribute a song to the global library in the GitHub repo
+  const contributeSong=async(song)=>{
+    const{ghToken,ghOwner,ghRepo}=cfg;
+    if(!ghToken||!ghOwner||!ghRepo)throw new Error('Set your GitHub token and repo in Settings first.');
+    const filename=slugify(song.title,song.artist)+'.json';
+    const songData={...song,cover:null}; // no base64 images in the repo
+    const songJson=JSON.stringify(songData,null,2);
+
+    // Upsert the song file
+    const existing=await ghGetFile(ghOwner,ghRepo,'songs/'+filename,ghToken);
+    await ghPutFile(ghOwner,ghRepo,'songs/'+filename,songJson,
+      `Add: ${song.title} by ${song.artist}`,ghToken,existing?.sha||null);
+
+    // Update songs/index.json
+    const idxFile=await ghGetFile(ghOwner,ghRepo,'songs/index.json',ghToken);
+    let index=idxFile?JSON.parse(idxFile.content):[];
+    const entry={id:slugify(song.title,song.artist),title:song.title,artist:song.artist,
+                 key:song.key,capo:song.capo||0,filename};
+    const existingIdx=index.findIndex(e=>e.id===entry.id);
+    if(existingIdx>=0)index[existingIdx]=entry;else index.push(entry);
+    index.sort((a,b)=>a.title.localeCompare(b.title));
+    await ghPutFile(ghOwner,ghRepo,'songs/index.json',JSON.stringify(index,null,2),
+      'Update songs index',ghToken,idxFile?.sha||null);
+  };
+
+  const TABS=[{id:'library',label:'Library',icon:'♪'},{id:'chords',label:'Chords',icon:'🎸'},{id:'settings',label:'Settings',icon:'⚙'}];
+
+  return(
+    <div style={{height:'100%',display:'flex',flexDirection:'column',background:'var(--bg)'}}>
+      {showNewSheet&&(
+        <NewSongSheet cfg={cfg}
+          onClose={()=>setShowNewSheet(false)}
+          onWriteNew={()=>{setEditing(null);setView('editor');}}
+          onImport={song=>setSongs(ss=>[...ss,song])}/>
+      )}
+      <div style={{flex:1,overflow:'hidden',position:'relative'}}>
+        {view==='home'&&mainTab==='library'&&(
+          <HomePage songs={songs}
+            onSelect={s=>{setSelected(s);setView('song');}}
+            onToggleLike={id=>updSong(id,{liked:!songs.find(s=>s.id===id).liked})}
+            onDelete={delSong}
+            onNew={()=>setShowNewSheet(true)}/>
+        )}
+        {view==='home'&&mainTab==='chords'&&<BrowseView/>}
+        {view==='home'&&mainTab==='settings'&&(
+          <SettingsView songs={songs} cfg={cfg} onCfgChange={handleCfgChange} onReplace={setSongs}/>
+        )}
+        {view==='song'&&selected&&(
+          <SongView
+            song={songs.find(s=>s.id===selected.id)||selected}
+            cfg={cfg}
+            onBack={()=>{setSelected(null);setView('home');}}
+            onEdit={()=>{setEditing(songs.find(s=>s.id===selected.id)||selected);setView('editor');}}
+            onToggleLike={id=>updSong(id,{liked:!songs.find(s=>s.id===id).liked})}
+            onContribute={contributeSong}/>
+        )}
+        {view==='editor'&&(
+          <SongEditor
+            song={editing}
+            onSave={saved=>{
+              setSongs(ss=>ss.find(s=>s.id===saved.id)?ss.map(s=>s.id===saved.id?saved:s):[...ss,saved]);
+              setSelected(saved);setView('song');
+            }}
+            onBack={()=>setView(selected?'song':'home')}
+            onDelete={id=>{delSong(id);setEditing(null);setView('home');}}/>
+        )}
+      </div>
+
+      {/* Bottom nav — always bottom-justified with safe area */}
+      {view==='home'&&(
+        <div style={{flexShrink:0,display:'flex',background:'var(--header-bg)',
+          borderTop:'1.5px solid var(--border)',
+          paddingBottom:'env(safe-area-inset-bottom,0px)',zIndex:10}}>
+          {TABS.map(({id,label,icon})=>(
+            <button key={id} onClick={()=>setMainTab(id)}
+              style={{flex:1,padding:'8px 0',minHeight:54,background:'transparent',border:'none',
+                display:'flex',flexDirection:'column',alignItems:'center',gap:3,cursor:'pointer'}}>
+              <span style={{fontSize:18,lineHeight:1}}>{icon}</span>
+              <span style={{fontSize:10,fontFamily:"'Crimson Text',Georgia,serif",fontWeight:mainTab===id?700:400,
+                color:mainTab===id?'var(--accent)':'var(--text-faint)'}}>{label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+try{
+  ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+}catch(e){
+  document.getElementById('root').innerHTML=`<pre style="color:#cc2222;padding:24px;font-size:13px">${String(e)}\n\n${e.stack||''}</pre>`;
+}
+</script>
+<script>
+if('serviceWorker'in navigator)
+  window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
+let dp=null;const bn=document.getElementById('install-banner');
+window.addEventListener('beforeinstallprompt',e=>{
+  e.preventDefault();dp=e;
+  if(!sessionStorage.getItem('install-dismissed'))bn.classList.remove('hidden');
+});
+document.getElementById('install-btn').addEventListener('click',async()=>{
+  if(!dp)return;dp.prompt();await dp.userChoice;dp=null;bn.classList.add('hidden');
+});
+document.getElementById('install-dismiss').addEventListener('click',()=>{
+  bn.classList.add('hidden');sessionStorage.setItem('install-dismissed','1');
+});
+window.addEventListener('appinstalled',()=>{bn.classList.add('hidden');dp=null;});
+</script>
+</body>
+</html>
