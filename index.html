@@ -132,6 +132,11 @@
 <script type="text/babel">
 const {useState,useEffect,useRef,useCallback,useMemo} = React;
 
+// ─── UG PROXY CONFIG ──────────────────────────────────────────────────────────
+// After deploying your Cloudflare Worker, paste its URL here (no trailing slash).
+// e.g. 'https://ug-proxy.yourname.workers.dev'
+const UG_PROXY_URL = '';
+
 // ─── MUSIC THEORY ─────────────────────────────────────────────────────────────
 const CHROM=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 const ENARH={Db:'C#',Eb:'D#',Gb:'F#',Ab:'G#',Bb:'A#','E#':'F','B#':'C',Cb:'B',Fb:'E'};
@@ -248,6 +253,23 @@ function parseTabImport(raw){
   const cleaned=[];let pb=false;
   for(const l of out){if(l===''){if(!pb)cleaned.push('');pb=true;}else{cleaned.push(l);pb=false;}}
   return{title,artist,key,capo,tempo:100,content:cleaned.join('\n').trim()};
+}
+
+// Convert UG's inline [ch]Chord[/ch] format → TabIt's [Chord] inline format,
+// then hand off to the existing parseTabImport pipeline.
+function parseUGContent(raw, meta={}){
+  // Strip [tab]…[/tab] block wrappers, convert [ch]X[/ch] → [X]
+  const converted = raw
+    .replace(/\[tab\]([\s\S]*?)\[\/tab\]/g, '$1')
+    .replace(/\[ch\]([^\[]+)\[\/ch\]/g, '[$1]')
+    .trim();
+  // Build a header line so parseTabImport can extract title/artist/key/capo
+  const header = [
+    meta.title && meta.artist ? `${meta.title} Chords by ${meta.artist}` : '',
+    meta.key   ? `Key: ${meta.key}`  : '',
+    meta.capo  ? `Capo: ${meta.capo}` : '',
+  ].filter(Boolean).join('\n');
+  return parseTabImport(header ? header + '\n\n' + converted : converted);
 }
 
 // ─── GITHUB API HELPERS ───────────────────────────────────────────────────────
@@ -500,6 +522,130 @@ function SongLine({line,onChordClick,semitones,fontSize}){
   );
 }
 
+// ─── ULTIMATE GUITAR SEARCH ──────────────────────────────────────────────────
+function UGSearch({onImport,onClose}){
+  const[q,setQ]=useState('');
+  const[results,setResults]=useState(null);
+  const[loading,setLoading]=useState(false);
+  const[status,setStatus]=useState('');
+  const[preview,setPreview]=useState(null);
+  const[loadingTab,setLoadingTab]=useState(false);
+
+  const doSearch=async()=>{
+    if(!q.trim())return;
+    setLoading(true);setResults(null);setStatus('');
+    try{
+      const res=await fetch(`${UG_PROXY_URL}?action=search&q=${encodeURIComponent(q)}`);
+      const data=await res.json();
+      if(data.error)throw new Error(data.error);
+      setResults(data.results);
+      if(data.results.length===0)setStatus('No results found.');
+    }catch(e){setStatus('Search failed: '+e.message);}
+    setLoading(false);
+  };
+
+  const openTab=async(entry)=>{
+    setLoadingTab(true);setStatus('');
+    try{
+      const res=await fetch(`${UG_PROXY_URL}?action=tab&url=${encodeURIComponent(entry.url)}`);
+      const data=await res.json();
+      if(data.error)throw new Error(data.error);
+      const parsed=parseUGContent(data.content,{title:entry.title,artist:entry.artist});
+      setPreview({...parsed,_type:entry.type,_rating:entry.rating,_votes:entry.votes});
+    }catch(e){setStatus('Could not load tab: '+e.message);}
+    setLoadingTab(false);
+  };
+
+  // ── Not configured ──
+  if(!UG_PROXY_URL)return(
+    <div style={{padding:'24px 20px',textAlign:'center',display:'flex',flexDirection:'column',gap:12,alignItems:'center'}}>
+      <span style={{fontSize:40}}>🔧</span>
+      <div style={{fontWeight:700,fontSize:16,color:'var(--text)'}}>Proxy not configured</div>
+      <div style={{color:'var(--text-sub)',fontSize:13,lineHeight:1.6,maxWidth:280}}>
+        Deploy the Cloudflare Worker and paste its URL into <code style={{background:'var(--surface2)',borderRadius:4,padding:'1px 5px'}}>UG_PROXY_URL</code> in the app code.
+      </div>
+    </div>
+  );
+
+  // ── Preview ──
+  if(preview){
+    const[ed,setEd]=useState(preview);
+    useEffect(()=>setEd(preview),[preview]);
+    return(
+      <div style={{padding:'0 20px 24px',display:'flex',flexDirection:'column',gap:14}}>
+        <div style={{display:'flex',alignItems:'center',gap:10}}>
+          <button onClick={()=>setPreview(null)} className="btn-secondary" style={{padding:'6px 12px'}}>← Back</button>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontWeight:700,fontSize:16,color:'var(--text)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ed.title}</div>
+            <div style={{color:'var(--text-sub)',fontSize:12}}>{ed.artist}</div>
+          </div>
+          <span className="tag">{preview._type}</span>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+          {[['Title',ed.title,t=>setEd(p=>({...p,title:t}))],
+            ['Artist',ed.artist,t=>setEd(p=>({...p,artist:t}))],
+            ['Key',ed.key,t=>setEd(p=>({...p,key:t}))],
+            ['Capo',String(ed.capo),t=>setEd(p=>({...p,capo:+t}))]
+          ].map(([l,v,sv])=>(
+            <div key={l}>
+              <label style={{display:'block',color:'var(--text-faint)',fontSize:10,marginBottom:4,textTransform:'uppercase',letterSpacing:'0.08em'}}>{l}</label>
+              <input className="inp" style={{fontSize:13}} value={v} onChange={e=>sv(e.target.value)}/>
+            </div>
+          ))}
+        </div>
+        <div style={{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:8,padding:10,maxHeight:160,overflowY:'auto'}}>
+          <pre style={{fontFamily:"'Courier Prime',monospace",fontSize:11,color:'var(--text-sub)',lineHeight:1.5,whiteSpace:'pre-wrap',wordBreak:'break-word'}}>
+            {ed.content.slice(0,500)}{ed.content.length>500?'\n…':''}
+          </pre>
+        </div>
+        {status&&<div style={{color:'var(--danger)',fontSize:13}}>{status}</div>}
+        <button onClick={()=>{onImport({...ed,id:Date.now(),liked:false,cover:null});onClose();}}
+          className="btn-primary" style={{width:'100%',padding:13,fontSize:15}}>
+          Add to Library ✓
+        </button>
+      </div>
+    );
+  }
+
+  // ── Search + Results ──
+  return(
+    <div style={{padding:'0 20px 24px',display:'flex',flexDirection:'column',gap:12}}>
+      <div style={{display:'flex',gap:8}}>
+        <input value={q} onChange={e=>setQ(e.target.value)}
+          onKeyDown={e=>e.key==='Enter'&&doSearch()}
+          placeholder="Song title or artist…" className="inp" style={{flex:1}} autoFocus/>
+        <button onClick={doSearch} className="btn-primary"
+          style={{padding:'10px 16px',fontSize:14,opacity:q.trim()?1:0.5,flexShrink:0}}>
+          {loading?<span className="spinner"/>:'Search'}
+        </button>
+      </div>
+      {status&&<div style={{background:'var(--surface2)',borderRadius:8,padding:'10px 12px',color:'var(--danger)',fontSize:13}}>{status}</div>}
+      {loadingTab&&<div style={{display:'flex',gap:8,color:'var(--text-sub)',fontSize:13,alignItems:'center'}}><span className="spinner"/>Loading tab…</div>}
+      {results&&<div style={{display:'flex',flexDirection:'column',gap:6,maxHeight:360,overflowY:'auto'}}>
+        {results.map((r,i)=>(
+          <button key={i} onClick={()=>openTab(r)}
+            style={{display:'flex',alignItems:'center',gap:12,padding:'11px 14px',
+              background:'var(--surface)',border:'1.5px solid var(--border)',borderRadius:10,
+              cursor:'pointer',textAlign:'left',width:'100%'}}>
+            <span style={{fontSize:20,flexShrink:0}}>🎸</span>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontWeight:600,fontSize:15,color:'var(--text)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.title}</div>
+              <div style={{color:'var(--text-sub)',fontSize:12}}>{r.artist}</div>
+            </div>
+            <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:3,flexShrink:0}}>
+              <span className="tag" style={{fontSize:10}}>{r.type}</span>
+              {r.votes>0&&<span style={{color:'var(--text-faint)',fontSize:11}}>★ {r.rating.toFixed(1)}</span>}
+            </div>
+          </button>
+        ))}
+      </div>}
+      {results&&results.length===0&&(
+        <div style={{color:'var(--text-faint)',fontSize:13,textAlign:'center',padding:'24px 0'}}>No results for "{q}"</div>
+      )}
+    </div>
+  );
+}
+
 // ─── GLOBAL LIBRARY SEARCH ────────────────────────────────────────────────────
 function GlobalLibrarySearch({cfg,onImport,onClose}){
   const[q,setQ]=useState('');
@@ -592,7 +738,7 @@ function GlobalLibrarySearch({cfg,onImport,onClose}){
 
 // ─── NEW SONG SHEET ───────────────────────────────────────────────────────────
 function NewSongSheet({cfg,onClose,onWriteNew,onImport}){
-  const[mode,setMode]=useState(null); // null | 'paste' | 'global'
+  const[mode,setMode]=useState(null); // null | 'paste' | 'global' | 'ug'
   const[raw,setRaw]=useState('');
   const[preview,setPreview]=useState(null);
   const[pasteStep,setPasteStep]=useState('paste');
@@ -653,6 +799,19 @@ function NewSongSheet({cfg,onClose,onWriteNew,onImport}){
     </div>
   </>);
 
+  // ── UG search mode ──
+  if(mode==='ug')return(<>
+    <div className="sheet-overlay" onClick={onClose}/>
+    <div className="sheet" style={{maxHeight:'94dvh'}}>
+      <div className="sheet-handle"/>
+      <div className="sheet-header">
+        <span className="sheet-title">🎸 Search Ultimate Guitar</span>
+        <button className="sheet-close" onClick={()=>setMode(null)}>✕</button>
+      </div>
+      <UGSearch onImport={onImport} onClose={onClose}/>
+    </div>
+  </>);
+
   // ── Global library mode ──
   if(mode==='global')return(<>
     <div className="sheet-overlay" onClick={onClose}/>
@@ -693,6 +852,7 @@ function NewSongSheet({cfg,onClose,onWriteNew,onImport}){
         {[
           ['✏️','Write from Scratch','Blank editor with chord palette',()=>{onWriteNew();onClose();}],
           ['📋','Paste from Tab Site','UltimateGuitar, etc — auto-converts',()=>setMode('paste')],
+          ['🎸','Search Ultimate Guitar','Live search UG\'s full catalogue',()=>setMode('ug')],
           ['🌐','Search Global Library','Browse songs shared by all users',()=>setMode('global')],
           ['📂','Import JSON File','Load a previously exported .json song',()=>fileRef.current.click()],
         ].map(([icon,title,desc,action])=>(
