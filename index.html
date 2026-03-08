@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
-  <meta name="theme-color" content="#ffffff" id="theme-color-meta"/>
+  <meta name="theme-color" content="#f6f1e6" id="theme-color-meta"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
   <meta name="apple-mobile-web-app-title" content="TabIt"/>
@@ -15,13 +15,13 @@
   <style>
     /* ── THEMES ──────────────────────────────────────────────────────────── */
     :root {
-      --bg:#ffffff; --surface:#f5f7fa; --surface2:#eef1f7; --surface3:#e6eaf4;
-      --border:#d4d9e8; --border2:#bec5d8;
-      --text:#080c18; --text-sub:#4a5470; --text-faint:#8892aa; --text-ghost:#c4cad8;
-      --accent:#1a4fc4; --accent-dark:#0d3490; --accent-text:#ffffff;
-      --chord:#1a4fc4; --chord-bg:rgba(26,79,196,0.07); --chord-border:rgba(26,79,196,0.28);
-      --chord-active:rgba(26,79,196,0.15); --lyric:#080c18; --danger:#cc2222;
-      --header-bg:#ffffff; --sheet-bg:#ffffff; --scrollbar:#c0c8dc; --scheme:light;
+      --bg:#f6f1e6; --surface:#ede6d6; --surface2:#e3dac4; --surface3:#d8ceb4;
+      --border:#c4b898; --border2:#a89c7e;
+      --text:#1a1006; --text-sub:#5a3e20; --text-faint:#9a7e52; --text-ghost:#c8b898;
+      --accent:#6b3600; --accent-dark:#4a2400; --accent-text:#fff8ee;
+      --chord:#7a4200; --chord-bg:rgba(107,54,0,0.09); --chord-border:rgba(107,54,0,0.30);
+      --chord-active:rgba(107,54,0,0.17); --lyric:#1a1006; --danger:#b82222;
+      --header-bg:#f6f1e6; --sheet-bg:#ede6d6; --scrollbar:#b8a87a; --scheme:light;
     }
     [data-theme=dark] {
       --bg:#000000; --surface:#0d1117; --surface2:#010409; --surface3:#131b25;
@@ -328,17 +328,17 @@ function slugify(title,artist){
 
 // ─── THEMES ───────────────────────────────────────────────────────────────────
 const THEMES=[
-  {id:'paper',name:'Paper',  emoji:'☀️',desc:'Clean white — high contrast'},
-  {id:'dark', name:'Dark',   emoji:'🌑',desc:'Pure black, white text'},
-  {id:'sepia',name:'Sepia',  emoji:'📜',desc:'Warm cream, classic feel'},
-  {id:'slate',name:'Slate',  emoji:'🪨',desc:'Cool blue-grey'},
+  {id:'paper',name:'Parchment',emoji:'📄',desc:'Warm cream — easy on the eyes'},
+  {id:'dark', name:'Dark',     emoji:'🌑',desc:'Pure black, white text'},
+  {id:'sepia',name:'Sepia',    emoji:'📜',desc:'Deep warm, classic feel'},
+  {id:'slate',name:'Slate',    emoji:'🪨',desc:'Cool blue-grey'},
 ];
 const THEME_KEY='tabit_theme_v2';
 function getStoredTheme(){return localStorage.getItem(THEME_KEY)||'paper';}
 function applyTheme(id){
   document.body.setAttribute('data-theme',id==='paper'?'':id);
-  const colors={dark:'#000000',sepia:'#faf6ee',slate:'#f4f6fb'};
-  document.getElementById('theme-color-meta')?.setAttribute('content',colors[id]||'#ffffff');
+  const colors={dark:'#000000',sepia:'#faf6ee',slate:'#f4f6fb',paper:'#f6f1e6'};
+  document.getElementById('theme-color-meta')?.setAttribute('content',colors[id]||'#f6f1e6');
   localStorage.setItem(THEME_KEY,id);
 }
 
