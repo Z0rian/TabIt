@@ -522,6 +522,46 @@ function SongLine({line,onChordClick,semitones,fontSize}){
   );
 }
 
+// ─── UG PREVIEW COMPONENT ──────────────────────────────────────────────────────
+function UGPreview({preview, onBack, onImport, onClose}) {
+  const[ed,setEd]=useState(preview);
+  useEffect(()=>setEd(preview),[preview]);
+  
+  return(
+    <div style={{padding:'0 20px 24px',display:'flex',flexDirection:'column',gap:14}}>
+      <div style={{display:'flex',alignItems:'center',gap:10}}>
+        <button onClick={onBack} className="btn-secondary" style={{padding:'6px 12px'}}>← Back</button>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontWeight:700,fontSize:16,color:'var(--text)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ed.title}</div>
+          <div style={{color:'var(--text-sub)',fontSize:12}}>{ed.artist}</div>
+        </div>
+        <span className="tag">{preview._type}</span>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+        {[['Title',ed.title,t=>setEd(p=>({...p,title:t}))],
+          ['Artist',ed.artist,t=>setEd(p=>({...p,artist:t}))],
+          ['Key',ed.key,t=>setEd(p=>({...p,key:t}))],
+          ['Capo',String(ed.capo),t=>setEd(p=>({...p,capo:+t}))]
+        ].map(([l,v,sv])=>(
+          <div key={l}>
+            <label style={{display:'block',color:'var(--text-faint)',fontSize:10,marginBottom:4,textTransform:'uppercase',letterSpacing:'0.08em'}}>{l}</label>
+            <input className="inp" style={{fontSize:13}} value={v} onChange={e=>sv(e.target.value)}/>
+          </div>
+        ))}
+      </div>
+      <div style={{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:8,padding:10,maxHeight:160,overflowY:'auto'}}>
+        <pre style={{fontFamily:"'Courier Prime',monospace",fontSize:11,color:'var(--text-sub)',lineHeight:1.5,whiteSpace:'pre-wrap',wordBreak:'break-word'}}>
+          {ed.content.slice(0,500)}{ed.content.length>500?'\n…':''}
+        </pre>
+      </div>
+      <button onClick={()=>{onImport({...ed,id:Date.now(),liked:false,cover:null});onClose();}}
+        className="btn-primary" style={{width:'100%',padding:13,fontSize:15}}>
+        Add to Library ✓
+      </button>
+    </div>
+  );
+}
+
 // ─── ULTIMATE GUITAR SEARCH ──────────────────────────────────────────────────
 function UGSearch({onImport,onClose}){
   const[q,setQ]=useState('');
@@ -568,44 +608,8 @@ function UGSearch({onImport,onClose}){
   );
 
   // ── Preview ──
-  if(preview){
-    const[ed,setEd]=useState(preview);
-    useEffect(()=>setEd(preview),[preview]);
-    return(
-      <div style={{padding:'0 20px 24px',display:'flex',flexDirection:'column',gap:14}}>
-        <div style={{display:'flex',alignItems:'center',gap:10}}>
-          <button onClick={()=>setPreview(null)} className="btn-secondary" style={{padding:'6px 12px'}}>← Back</button>
-          <div style={{flex:1,minWidth:0}}>
-            <div style={{fontWeight:700,fontSize:16,color:'var(--text)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ed.title}</div>
-            <div style={{color:'var(--text-sub)',fontSize:12}}>{ed.artist}</div>
-          </div>
-          <span className="tag">{preview._type}</span>
-        </div>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-          {[['Title',ed.title,t=>setEd(p=>({...p,title:t}))],
-            ['Artist',ed.artist,t=>setEd(p=>({...p,artist:t}))],
-            ['Key',ed.key,t=>setEd(p=>({...p,key:t}))],
-            ['Capo',String(ed.capo),t=>setEd(p=>({...p,capo:+t}))]
-          ].map(([l,v,sv])=>(
-            <div key={l}>
-              <label style={{display:'block',color:'var(--text-faint)',fontSize:10,marginBottom:4,textTransform:'uppercase',letterSpacing:'0.08em'}}>{l}</label>
-              <input className="inp" style={{fontSize:13}} value={v} onChange={e=>sv(e.target.value)}/>
-            </div>
-          ))}
-        </div>
-        <div style={{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:8,padding:10,maxHeight:160,overflowY:'auto'}}>
-          <pre style={{fontFamily:"'Courier Prime',monospace",fontSize:11,color:'var(--text-sub)',lineHeight:1.5,whiteSpace:'pre-wrap',wordBreak:'break-word'}}>
-            {ed.content.slice(0,500)}{ed.content.length>500?'\n…':''}
-          </pre>
-        </div>
-        {status&&<div style={{color:'var(--danger)',fontSize:13}}>{status}</div>}
-        <button onClick={()=>{onImport({...ed,id:Date.now(),liked:false,cover:null});onClose();}}
-          className="btn-primary" style={{width:'100%',padding:13,fontSize:15}}>
-          Add to Library ✓
-        </button>
-      </div>
-    );
-  }
+  if(preview) return <UGPreview preview={preview} onBack={()=>setPreview(null)} onImport={onImport} onClose={onClose} />;
+
 
   // ── Search + Results ──
   return(
