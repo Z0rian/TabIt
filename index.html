@@ -1334,7 +1334,6 @@ function SettingsView({songs,cfg,onCfgChange,onReplace}){
   };
 
   const pullGist=async()=>{
-    if(!localCfg.ghToken){setSyncStatus('❌ Enter your GitHub token first.');return;}
     if(!localCfg.ghGistId){setSyncStatus('❌ No gist ID saved. Push first to create one, or paste a Gist ID.');return;}
     setLoading(true);setSyncStatus('');
     try{
