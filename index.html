@@ -370,7 +370,7 @@ function applyTheme(id){
 // ─── PERSISTENCE ──────────────────────────────────────────────────────────────
 const SONGS_KEY='tabit_songs_v3';
 const CFG_KEY='tabit_config_v1';
-const DEFAULT_CFG={ghToken:'',ghOwner:'',ghRepo:'tabit',ghGistId:'',lastSync:''};
+const DEFAULT_CFG={ghToken:'',ghOwner:'',ghRepo:'TabIt',ghGistId:'',lastSync:''};
 
 function loadSongs(){try{const r=localStorage.getItem(SONGS_KEY);if(r)return JSON.parse(r);}catch{}return INIT_SONGS;}
 function saveSongs(s){try{localStorage.setItem(SONGS_KEY,JSON.stringify(s));}catch{}}
