@@ -1392,8 +1392,10 @@ function SettingsView({songs,cfg,onCfgChange,onReplace}){
              'github.com/settings/tokens → generate classic token with repo + gist scopes'],
             ['Your GitHub Username', 'ghOwner', 'text', 'your-username',
              'Used to read & write the global songs/ library in your repo'],
-            ['Repo Name', 'ghRepo', 'text', 'tabit',
+            ['Repo Name', 'ghRepo', 'text', 'TabIt',
              'The GitHub repository where this app lives'],
+            ['Gist ID (for Sync)', 'ghGistId', 'text', '',
+             'Leave blank to auto-create on Push. Paste an ID here to Pull from another device.'],
           ].map(([label,field,type,ph,hint])=>(
             <div key={field} style={{marginBottom:14}}>
               <label style={{display:'block',color:'var(--text-faint)',fontSize:10,marginBottom:5,textTransform:'uppercase',letterSpacing:'0.1em'}}>{label}</label>
@@ -1402,13 +1404,6 @@ function SettingsView({songs,cfg,onCfgChange,onReplace}){
               <div style={{color:'var(--text-ghost)',fontSize:11,marginTop:3}}>{hint}</div>
             </div>
           ))}
-          {localCfg.ghGistId&&(
-            <div style={{background:'var(--surface2)',borderRadius:8,border:'1px solid var(--border)',padding:'8px 12px',marginBottom:6,fontSize:12}}>
-              <span style={{color:'var(--text-sub)'}}>Gist ID: </span>
-              <span style={{fontFamily:'monospace',color:'var(--text)',wordBreak:'break-all'}}>{localCfg.ghGistId}</span>
-              <button onClick={()=>updateCfg({ghGistId:''})} style={{marginLeft:8,background:'none',border:'none',color:'var(--danger)',fontSize:11,cursor:'pointer',verticalAlign:'middle'}}>clear</button>
-            </div>
-          )}
         </div>
 
         {/* Gist sync */}
