@@ -1443,6 +1443,212 @@ function SettingsView({songs,cfg,onCfgChange,onReplace}){
   );
 }
 
+// ─── TUNER ────────────────────────────────────────────────────────────────────
+function autoCorrelate(buf, sampleRate) {
+  let size = buf.length;
+  let rms = 0;
+  for (let i = 0; i < size; i++) {
+    const val = buf[i];
+    rms += val * val;
+  }
+  rms = Math.sqrt(rms / size);
+  if (rms < 0.01) return -1; // Not enough signal
+
+  let r1 = 0, r2 = size - 1, thres = 0.2;
+  for (let i = 0; i < size / 2; i++) {
+    if (Math.abs(buf[i]) < thres) { r1 = i; break; }
+  }
+  for (let i = 1; i < size / 2; i++) {
+    if (Math.abs(buf[size - i]) < thres) { r2 = size - i; break; }
+  }
+  buf = buf.slice(r1, r2);
+  size = buf.length;
+
+  const c = new Array(size).fill(0);
+  for (let i = 0; i < size; i++) {
+    for (let j = 0; j < size - i; j++) {
+      c[i] = c[i] + buf[j] * buf[j + i];
+    }
+  }
+
+  let d = 0;
+  while (c[d] > c[d + 1]) d++;
+  let maxval = -1, maxpos = -1;
+  for (let i = d; i < size; i++) {
+    if (c[i] > maxval) {
+      maxval = c[i];
+      maxpos = i;
+    }
+  }
+  let T0 = maxpos;
+  let x1 = c[T0 - 1], x2 = c[T0], x3 = c[T0 + 1];
+  let a = (x1 + x3 - 2 * x2) / 2;
+  let b = (x3 - x1) / 2;
+  if (a) T0 = T0 - b / (2 * a);
+
+  return sampleRate / T0;
+}
+
+const NOTE_STRINGS = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'G#', 'A', 'Bb', 'B'];
+
+function getNoteFromPitch(frequency) {
+  const noteNum = 12 * (Math.log(frequency / 440) / Math.log(2));
+  return Math.round(noteNum) + 69; // A4 is MIDI note 69
+}
+
+function getFrequencyFromNote(note) {
+  return 440 * Math.pow(2, (note - 69) / 12);
+}
+
+function getCents(frequency, note) {
+  return Math.floor(1200 * Math.log(frequency / getFrequencyFromNote(note)) / Math.log(2));
+}
+
+function TunerView() {
+  const [active, setActive] = useState(false);
+  const [pitch, setPitch] = useState(0);
+  const [note, setNote] = useState('-');
+  const [cents, setCents] = useState(0);
+  const [error, setError] = useState(null);
+
+  const audioCtxRef = useRef(null);
+  const analyserRef = useRef(null);
+  const rafId = useRef(null);
+  const bufRef = useRef(new Float32Array(2048));
+
+  const startTuner = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      analyserRef.current = audioCtxRef.current.createAnalyser();
+      analyserRef.current.fftSize = 2048;
+
+      const source = audioCtxRef.current.createMediaStreamSource(stream);
+      source.connect(analyserRef.current);
+      setActive(true);
+      setError(null);
+      updatePitch();
+    } catch (err) {
+      setError('Microphone access denied or unavailable.');
+    }
+  };
+
+  const stopTuner = () => {
+    if (rafId.current) cancelAnimationFrame(rafId.current);
+    if (audioCtxRef.current) {
+      audioCtxRef.current.close().catch(() => {});
+    }
+    setActive(false);
+    setPitch(0);
+    setNote('-');
+    setCents(0);
+  };
+
+  useEffect(() => {
+    return stopTuner; // Cleanup on unmount
+  }, []);
+
+  const updatePitch = () => {
+    if (!analyserRef.current) return;
+    analyserRef.current.getFloatTimeDomainData(bufRef.current);
+    const ac = autoCorrelate(bufRef.current, audioCtxRef.current.sampleRate);
+    
+    if (ac !== -1) {
+      setPitch(ac);
+      const noteNum = getNoteFromPitch(ac);
+      setNote(NOTE_STRINGS[noteNum % 12]);
+      setCents(getCents(ac, noteNum));
+    } else {
+      setPitch(0);
+    }
+    rafId.current = requestAnimationFrame(updatePitch);
+  };
+
+  // Dial positioning: -50 to +50 cents -> -45deg to +45deg visually
+  const dialRotation = Math.max(-45, Math.min(45, (cents / 50) * 45));
+  const isTuned = pitch > 0 && Math.abs(cents) <= 5;
+
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
+      <div style={{ background: 'var(--header-bg)', borderBottom: '1px solid var(--border)',
+        padding: '16px 18px 14px', paddingTop: 'calc(16px + env(safe-area-inset-top,0px))' }}>
+        <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', fontFamily: "'Crimson Text',Georgia,serif" }}>Guitar Tuner</div>
+        <div style={{ color: 'var(--text-faint)', fontSize: 12, marginTop: 2 }}>Standard Chromatic</div>
+      </div>
+      
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+        {error ? (
+          <div style={{ color: 'var(--danger)', textAlign: 'center', marginBottom: 20, fontSize: 14 }}>{error}</div>
+        ) : null}
+
+        {!active ? (
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ color: 'var(--text-sub)', marginBottom: 24, fontSize: 14 }}>
+              Enable your microphone to tune your guitar.
+            </div>
+            <button className="btn-primary" onClick={startTuner} style={{ fontSize: 16, padding: '12px 24px', borderRadius: 24 }}>
+              Start Tuner
+            </button>
+          </div>
+        ) : (
+          <div style={{ width: '100%', maxWidth: 320, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 30 }}>
+            {/* Display Note */}
+            <div style={{ 
+              fontSize: 80, fontWeight: 700, fontFamily: "'Crimson Text',Georgia,serif", 
+              color: isTuned ? '#1a7a3a' : 'var(--text)', 
+              textShadow: isTuned ? '0 0 20px rgba(26,122,58,0.3)' : 'none',
+              transition: 'color 0.2s',
+              height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center' 
+            }}>
+              {pitch > 0 ? note : '–'}
+            </div>
+
+            {/* Hz display */}
+            <div style={{ color: 'var(--text-faint)', fontSize: 15, fontFamily: 'monospace' }}>
+              {pitch > 0 ? pitch.toFixed(1) + ' Hz' : 'Listening...'}
+            </div>
+
+            {/* Visual Dial Canvas */}
+            <div style={{ position: 'relative', width: 240, height: 120, overflow: 'hidden', marginTop: 10 }}>
+              {/* Arc graphic */}
+              <svg width="240" height="120" style={{ position: 'absolute', bottom: 0 }}>
+                <path d="M 20 120 A 100 100 0 0 1 220 120" fill="none" stroke="var(--surface3)" strokeWidth="6" strokeLinecap="round" />
+                <path d="M 105 120 A 100 100 0 0 1 135 120" fill="none" stroke="rgba(26,122,58,0.3)" strokeWidth="8" strokeLinecap="round" />
+                <line x1="120" y1="20" x2="120" y2="35" stroke="var(--border2)" strokeWidth="2" />
+                <line x1="50" y1="49" x2="60" y2="59" stroke="var(--border2)" strokeWidth="2" />
+                <line x1="190" y1="49" x2="180" y2="59" stroke="var(--border2)" strokeWidth="2" />
+              </svg>
+
+              {/* Needle */}
+              <div style={{
+                position: 'absolute', bottom: -5, left: '50%', width: 4, height: 95,
+                background: isTuned ? '#1a7a3a' : 'var(--accent)',
+                transformOrigin: 'bottom center',
+                transform: `translateX(-50%) rotate(${pitch > 0 ? dialRotation : 0}deg)`,
+                transition: 'transform 0.1s linear, background 0.2s',
+                borderRadius: 2
+              }} />
+            </div>
+
+            {/* Cents reading */}
+            <div style={{ 
+              background: 'var(--surface)', padding: '6px 16px', borderRadius: 20, 
+              border: '1px solid var(--border)', fontSize: 13, color: 'var(--text-sub)', fontWeight: 600 
+            }}>
+              {pitch > 0 ? (cents > 0 ? `+${cents}` : cents) : '0'} cents
+            </div>
+
+            <button onClick={stopTuner} style={{
+              marginTop: 20, background: 'var(--surface2)', border: 'none', padding: '10px 20px', 
+              borderRadius: 20, color: 'var(--text-sub)', fontWeight: 600, cursor: 'pointer', fontFamily: "'Crimson Text',Georgia,serif"
+            }}>Stop Tuning</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── INIT SONGS ───────────────────────────────────────────────────────────────
 const INIT_SONGS=[
   {id:1,liked:true,key:"G",capo:0,tempo:72,title:"Knockin' on Heaven's Door",artist:"Bob Dylan",cover:null,content:"[Verse 1]\n[G]Mama, take this [D]badge off of [Am]me\n[G]I can't use it [D]anymore [Am]\n\n[G]It's gettin' dark, [D]too dark to [Am]see\n[G]I feel I'm knockin' [D]on heaven's [Am]door\n\n[Chorus]\n[G]Knock, knock, knockin' on heaven's [D]door [Am]\n[G]Knock, knock, knockin' on heaven's [D]door [Am]"},
@@ -1494,7 +1700,7 @@ function App(){
       'Update songs index',ghToken,idxFile?.sha||null);
   };
 
-  const TABS=[{id:'library',label:'Library',icon:'♪'},{id:'chords',label:'Chords',icon:'🎸'},{id:'settings',label:'Settings',icon:'⚙'}];
+  const TABS=[{id:'library',label:'Library',icon:'♪'},{id:'chords',label:'Chords',icon:'🎸'},{id:'tuner',label:'Tuner',icon:'📻'},{id:'settings',label:'Settings',icon:'⚙'}];
 
   return(
     <div style={{height:'100%',display:'flex',flexDirection:'column',background:'var(--bg)'}}>
@@ -1513,6 +1719,7 @@ function App(){
             onNew={()=>setShowNewSheet(true)}/>
         )}
         {view==='home'&&mainTab==='chords'&&<BrowseView/>}
+        {view==='home'&&mainTab==='tuner'&&<TunerView/>}
         {view==='home'&&mainTab==='settings'&&(
           <SettingsView songs={songs} cfg={cfg} onCfgChange={handleCfgChange} onReplace={setSongs}/>
         )}
