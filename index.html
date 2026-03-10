@@ -268,8 +268,7 @@ function parseTabImport(raw){
 function parseUGContent(raw, meta={}){
   const converted = raw
     .replace(/\[tab\]([\s\S]*?)\[\/tab\]/g, '$1')
-    .replace(/\[ch\]/g, '   [')
-    .replace(/\[\/ch\]/g, ']   ')
+    .replace(/\[ch\](.*?)\[\/ch\]/g, '[$1]       ')
     .trim();
   const header = [
     meta.title && meta.artist ? `${meta.title} Chords by ${meta.artist}` : '',
