@@ -4,7 +4,6 @@ const n2s=n=>CHROM.indexOf(ENARH[n]??n);
 
 function isChord(s) {
   if (!s) return false;
-  // Support bracketed chords [Am]
   let c = s; if(c.startsWith('[') && c.endsWith(']')) c = c.slice(1,-1);
   const m = c.match(/^([A-G][#b]?)(m|maj|min|sus|add|aug|dim)?(6|7|9|11|13)?(\/[A-G][#b]?)?$/i);
   return !!m;
@@ -26,7 +25,7 @@ function parseTabImport(raw) {
     const rx = /(\S+)/g;
     let m;
     while ((m = rx.exec(cl)) !== null) {
-      const name = m[1].replace(/[\[\]]/g, '');
+      const name = m[1];
       if (isChord(name)) chords.push({ chord: name, col: m.index });
     }
     if (!chords.length) return ll.trimEnd();
@@ -40,20 +39,17 @@ function parseTabImport(raw) {
     return result.trimEnd();
   };
 
-  const hasInline = lines.some(l => /\[[A-G][#b]?/.test(l));
-  if (hasInline) return { title, artist, key, capo, content: raw };
-
   const out = [];
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
     if (isChordLine(line)) {
       const next = lines[i + 1];
-      if (next && !isChordLine(next)) {
+      if (next && !isChordLine(next) && !/^\s*e\|/.test(next) && !/^\[.+\]$/.test(next.trim())) {
         out.push(mergeChordLyric(line, next));
         i += 2; continue;
       }
-      out.push(line.split(/\s+/).filter(Boolean).map(c => `[${c}]`).join(''));
+      out.push(line.split(/\s+/).filter(Boolean).map(c => `[${c}]`).join(' '));
     } else {
       out.push(line);
     }
@@ -65,21 +61,15 @@ function parseTabImport(raw) {
 function parseUGContent(raw, meta = {}) {
   const converted = raw
     .replace(/\[tab\]([\s\S]*?)\[\/tab\]/g, '$1')
-    .replace(/\[ch\]/g, '[')
-    .replace(/\[\/ch\]/g, ']')
+    .replace(/\[ch\]/g, '')
+    .replace(/\[\/ch\]/g, '')
     .trim();
-  return parseTabImport(converted);
+  return { ...meta, content: converted };
 }
 
-// TEST CASES
-const rawUG = `[tab][ch]G[/ch]          [ch]Cadd9[/ch]
-Some lyrics here[/tab]`;
-const parsed = parseUGContent(rawUG);
-console.log("UG IMPORT TEST:");
-console.log(parsed.content);
-// Expected: [G]         [Cadd9]Some lyrics here (or merged)
-
-const mixed = "         [G]      [Cadd9]\nSome lyrics here";
-const p2 = parseTabImport(mixed);
-console.log("\nMORPHED GRID TEST:");
-console.log(p2.content);
+// TEST
+const sample = `[ch]Am[/ch]      [ch]G[/ch]\nLyrics here`;
+const preview = parseUGContent(sample);
+console.log("CLEAN PREVIEW:", JSON.stringify(preview.content));
+const final = parseTabImport(preview.content);
+console.log("FINAL MERGED:", final.content);
