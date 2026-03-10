@@ -106,25 +106,12 @@
       text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px}
     .spinner{width:15px;height:15px;border:2px solid var(--border);border-top-color:var(--accent);
       border-radius:50%;animation:spin .7s linear infinite;display:inline-block;flex-shrink:0}
-    #install-banner{position:fixed;bottom:0;left:0;right:0;z-index:300;background:var(--header-bg);
-      border-top:1.5px solid var(--accent);
-      padding:14px 18px calc(14px + env(safe-area-inset-bottom,0px));
-      display:flex;align-items:center;gap:12px;animation:slideUp .3s ease;
-      box-shadow:0 -2px 16px rgba(0,0,0,0.1)}
-    #install-banner.hidden{display:none}
+
   </style>
 </head>
 <body>
 <div id="root"></div>
-<div id="install-banner" class="hidden">
-  <span style="font-size:22px">🎸</span>
-  <div style="flex:1">
-    <div style="font-weight:600;font-size:14px;color:var(--text)">Add TabIt to Home Screen</div>
-    <div style="font-size:11px;color:var(--text-sub)">Works offline · Instant access</div>
-  </div>
-  <button class="btn-primary" id="install-btn" style="font-size:13px;padding:8px 16px">Install</button>
-  <button id="install-dismiss" style="background:none;border:none;font-size:18px;padding:4px;color:var(--text-faint)">✕</button>
-</div>
+
 
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
@@ -1696,8 +1683,16 @@ function App(){
   const[deferredPrompt,setDeferredPrompt]=useState(null);
 
   useEffect(()=>{
-    const h=e=>{e.preventDefault();setDeferredPrompt(e);};
+    const h=e=>{
+      e.preventDefault();
+      console.log('✨ beforeinstallprompt fired');
+      setDeferredPrompt(e);
+    };
     window.addEventListener('beforeinstallprompt',h);
+    if(window.capturedPrompt){
+      console.log('✨ Using captured prompt');
+      setDeferredPrompt(window.capturedPrompt);
+    }
     return ()=>window.removeEventListener('beforeinstallprompt',h);
   },[]);
 
@@ -1813,19 +1808,13 @@ try{
 </script>
 <script>
 if('serviceWorker'in navigator)
-  window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
-let dp=null;const bn=document.getElementById('install-banner');
+  window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').then(()=>console.log('🚀 SW Registered')).catch(e=>console.error('❌ SW Failed',e)));
+
 window.addEventListener('beforeinstallprompt',e=>{
-  e.preventDefault();dp=e;
-  if(!sessionStorage.getItem('install-dismissed'))bn.classList.remove('hidden');
+  e.preventDefault();
+  window.capturedPrompt=e;
+  console.log('📥 Prompt captured early');
 });
-document.getElementById('install-btn').addEventListener('click',async()=>{
-  if(!dp)return;dp.prompt();await dp.userChoice;dp=null;bn.classList.add('hidden');
-});
-document.getElementById('install-dismiss').addEventListener('click',()=>{
-  bn.classList.add('hidden');sessionStorage.setItem('install-dismissed','1');
-});
-window.addEventListener('appinstalled',()=>{bn.classList.add('hidden');dp=null;});
 </script>
 </body>
 </html>
