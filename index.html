@@ -155,7 +155,12 @@ function txChord(chord,d,flat=false){
   return txNote(m[1],d,flat)+m[2];
 }
 function shortTx(fromKey,toSem){let d=toSem-n2s(fromKey);while(d>6)d-=12;while(d<=-6)d+=12;return d;}
-function isChord(s){return/^[A-G][#b]?(?:m|maj|min|aug|dim|sus|add)?(?:\d+)?(?:\/[A-G][#b]?)?$/.test(s)&&s.length<=10;}
+function isChord(s){
+  const t=s.replace(/[\[\]]/g,'').trim();
+  if(!t)return false;
+  return /^[A-G][#b]?[a-zA-Z0-9#b\+]*(\/[A-G][#b]?)?$/.test(t) && t.length <= 12;
+}
+const isChordLine=l=>{const t=l.trim();if(!t)return false;const toks=t.split(/\s+/).filter(Boolean);return toks.length>0&&toks.every(tok=>isChord(tok)||/^x\d+$/i.test(tok));};
 function isSectionHdr(line){return/^\[[^\[\]]+\]$/.test(line)&&!isChord(line.slice(1,-1));}
 function parseSegs(line){
   const rx=/\[([^\[\]]+)\]/g,parts=[];let last=0,m;
@@ -163,8 +168,16 @@ function parseSegs(line){
   if(last<line.length)parts.push({t:'txt',v:line.slice(last)});
   const segs=[];
   for(let i=0;i<parts.length;i++){
-    if(parts[i].t==='crd'){const txt=(i+1<parts.length&&parts[i+1].t==='txt')?parts[i+1].v:'';segs.push({chord:parts[i].v,text:txt});if(txt)i++;}
-    else segs.push({chord:null,text:parts[i].v});
+    const p=parts[i];
+    if(p.t==='crd'){
+      const txt=(i+1<parts.length&&parts[i+1].t==='txt')?parts[i+1].v:'';
+      const spaceIdx=txt.indexOf(' ');
+      if(spaceIdx===-1){segs.push({chord:p.v,text:txt});if(txt)i++;}
+      else{segs.push({chord:p.v,text:txt.slice(0,spaceIdx+1)});parts[i+1].v=txt.slice(spaceIdx+1);}
+    }else{
+      const segments=p.v.split(/(\s+)/);
+      for(const s of segments)if(s)segs.push({chord:null,text:s});
+    }
   }
   return segs;
 }
@@ -231,10 +244,17 @@ function parseTabImport(raw){
   const isChordLine=l=>{const t=l.trim();if(!t)return false;const toks=t.split(/\s+/).filter(Boolean);return toks.length>0&&toks.every(tok=>isChord(tok)||/^x\d+$/i.test(tok));};
   const mergeChordLyric=(cl,ll)=>{
     const chords=[];const rx=/(\S+)/g;let m;
-    while((m=rx.exec(cl))!==null)if(isChord(m[1]))chords.push({chord:m[1],col:m.index});
+    while((m=rx.exec(cl))!==null){
+      const name=m[1].replace(/[\[\]]/g,'');
+      if(isChord(name))chords.push({chord:name,col:m.index});
+    }
     if(!chords.length)return ll.trimEnd();
     let result=ll;while(result.length<chords[chords.length-1].col)result+=' ';
-    for(let i=chords.length-1;i>=0;i--){const{chord,col}=chords[i];const at=Math.min(col,result.length);result=result.slice(0,at)+'['+chord+']'+result.slice(at);}
+    for(let i=chords.length-1;i>=0;i--){
+      const{chord,col}=chords[i];
+      const at=Math.min(col,result.length);
+      result=result.slice(0,at)+'['+chord+']'+result.slice(at);
+    }
     return result.trimEnd();
   };
   const cl=lines.slice(startIdx);const out=[];let i=0;
@@ -258,15 +278,11 @@ function parseTabImport(raw){
 // Convert UG's inline [ch]Chord[/ch] format → TabIt's [Chord] inline format,
 // then hand off to the existing parseTabImport pipeline.
 function parseUGContent(raw, meta={}){
-  // Strip [tab]…[/tab] block wrappers
-  // Replace [ch] and [/ch] with spaces of the EXACT same length (4 and 5 chars)
-  // so the lateral column position of the chord perfectly aligns with lyrics below it
   const converted = raw
     .replace(/\[tab\]([\s\S]*?)\[\/tab\]/g, '$1')
-    .replace(/\[ch\]/g, '    ')
-    .replace(/\[\/ch\]/g, '     ')
+    .replace(/\[ch\]/g, '   [')
+    .replace(/\[\/ch\]/g, ']   ')
     .trim();
-  // Build a header line so parseTabImport can extract title/artist/key/capo
   const header = [
     meta.title && meta.artist ? `${meta.title} Chords by ${meta.artist}` : '',
     meta.key   ? `Key: ${meta.key}`  : '',
@@ -497,7 +513,6 @@ function SongLine({line,onChordClick,semitones,fontSize}){
     </div>
   );
 
-  // Mixed line: each segment is a column of [chord][text]
   return(
     <div style={{marginBottom:'0.55em',fontFamily:"'Courier Prime','Courier New',monospace",lineHeight:1.85}}>
       <div style={{display:'flex',flexWrap:'wrap',alignItems:'flex-end'}}>
@@ -506,11 +521,11 @@ function SongLine({line,onChordClick,semitones,fontSize}){
           const mw=Math.max(disp?disp.length+0.8:0,seg.text.length||0);
           return(
             <span key={i} style={{display:'inline-flex',flexDirection:'column',alignItems:'flex-start',
-              minWidth:mw>0?mw+'ch':undefined}}>
+              minWidth:mw>0?mw+'ch':undefined,whiteSpace:'nowrap'}}>
               {hasChords&&(
                 <span style={{height:'1.6em',display:'flex',alignItems:'center',paddingRight:2}}>
                   {disp&&<button className="chord-badge"
-                    style={{fontSize:Math.round(fontSize*0.87),whiteSpace:'nowrap'}}
+                    style={{fontSize:Math.round(fontSize*0.87),whiteSpace:'nowrap',cursor:'pointer'}}
                     onClick={()=>onChordClick(disp)}>{disp}</button>}
                 </span>
               )}
