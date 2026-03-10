@@ -846,7 +846,7 @@
               {ed.content.slice(0, 500)}{ed.content.length > 500 ? '\n…' : ''}
             </pre>
           </div>
-          <button onClick={() => { onImport({ ...parseTabImport(ed.content), id: Date.now(), liked: false, cover: null }); onClose(); }}
+          <button onClick={() => { onImport({ ...ed, id: Date.now(), liked: false, cover: null }); onClose(); }}
             className="btn-primary" style={{ width: '100%', padding: 13, fontSize: 15 }}>
             Add to Library ✓
           </button>
@@ -907,7 +907,11 @@
       return (
         <div style={{ padding: '0 20px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ display: 'flex', gap: 8 }}>
-            <input value={q} onChange={e => setQ(e.target.value)}
+            <input value={q} onChange={e => {
+              const val = e.target.value;
+              setQ(val);
+              if (!val.trim()) { setResults(null); setStatus(''); }
+            }}
               onKeyDown={e => e.key === 'Enter' && doSearch()}
               placeholder="Search Ultimate Guitar" className="inp" style={{ flex: 1 }} autoFocus />
             <button onClick={doSearch} className="btn-primary"
@@ -940,7 +944,7 @@
           {results && results.length === 0 && (
             <div style={{ color: 'var(--text-faint)', fontSize: 13, textAlign: 'center', padding: '24px 0' }}>No results for "{q}"</div>
           )}
-          {footer}
+          {(!results && !loading && !status && !loadingTab) && footer}
         </div>
       );
     }
