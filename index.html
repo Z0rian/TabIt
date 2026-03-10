@@ -1320,7 +1320,7 @@ function BrowseView(){
 }
 
 // ─── SETTINGS VIEW ─────────────────────────────────────────────────────────────
-function SettingsView({songs,cfg,onCfgChange,onReplace}){
+function SettingsView({songs,cfg,onCfgChange,onReplace,deferredPrompt,onInstall}){
   const[theme,setThemeState]=useState(getStoredTheme);
   const[localCfg,setLocalCfg]=useState(cfg);
   const[syncStatus,setSyncStatus]=useState('');
@@ -1374,6 +1374,17 @@ function SettingsView({songs,cfg,onCfgChange,onReplace}){
         <div style={{color:'var(--text-faint)',fontSize:12,marginTop:2}}>Theme, sync &amp; GitHub</div>
       </div>
       <div style={{flex:1,overflowY:'auto',padding:'16px 18px 80px',display:'flex',flexDirection:'column',gap:24}}>
+        
+        {/* PWA Install Recommendation */}
+        {deferredPrompt && (
+          <div style={{background:'var(--accent)',borderRadius:12,padding:'16px',color:'var(--accent-text)',display:'flex',flexDirection:'column',gap:10,boxShadow:'0 4px 12px rgba(0,0,0,0.1)'}}>
+            <div style={{fontWeight:700,fontSize:16}}>✨ Install TabIt Desktop</div>
+            <div style={{fontSize:13,opacity:0.9}}>Add TabIt to your dock or taskbar for a better, full-screen experience and offline access.</div>
+            <button className="btn-primary" style={{alignSelf:'flex-start',background:'white',color:'var(--accent)',border:'none'}} onClick={onInstall}>
+              Install Now
+            </button>
+          </div>
+        )}
 
         {/* Theme */}
         <div>
@@ -1682,6 +1693,20 @@ function App(){
   const[editing,setEditing]=useState(null);
   const[mainTab,setMainTab]=useState('library');
   const[showNewSheet,setShowNewSheet]=useState(false);
+  const[deferredPrompt,setDeferredPrompt]=useState(null);
+
+  useEffect(()=>{
+    const h=e=>{e.preventDefault();setDeferredPrompt(e);};
+    window.addEventListener('beforeinstallprompt',h);
+    return ()=>window.removeEventListener('beforeinstallprompt',h);
+  },[]);
+
+  const installApp=async()=>{
+    if(!deferredPrompt)return;
+    deferredPrompt.prompt();
+    const{outcome}=await deferredPrompt.userChoice;
+    if(outcome==='accepted')setDeferredPrompt(null);
+  };
 
   useEffect(()=>{applyTheme(getStoredTheme());},[]);
   useEffect(()=>saveSongs(songs),[songs]);
@@ -1736,7 +1761,8 @@ function App(){
         {view==='home'&&mainTab==='chords'&&<BrowseView/>}
         {view==='home'&&mainTab==='tuner'&&<TunerView/>}
         {view==='home'&&mainTab==='settings'&&(
-          <SettingsView songs={songs} cfg={cfg} onCfgChange={handleCfgChange} onReplace={setSongs}/>
+          <SettingsView songs={songs} cfg={cfg} onCfgChange={handleCfgChange} onReplace={setSongs} 
+            deferredPrompt={deferredPrompt} onInstall={installApp}/>
         )}
         {view==='song'&&selected&&(
           <SongView
