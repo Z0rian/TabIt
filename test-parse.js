@@ -63,10 +63,10 @@ function parseTabImport(raw) {
 }
 
 function parseUGContent(raw, meta = {}) {
-  // Use length-preserving replacement for [ch] tags.
   const converted = raw
     .replace(/\[tab\]([\s\S]*?)\[\/tab\]/g, '$1')
-    .replace(/\[ch\](.*?)\[\/ch\]/g, '[$1]       ') 
+    .replace(/\[ch\]/g, '[')
+    .replace(/\[\/ch\]/g, ']')
     .trim();
   return parseTabImport(converted);
 }
