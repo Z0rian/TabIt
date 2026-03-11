@@ -1346,8 +1346,8 @@
       const [semitones, setSemitones] = useState(0);
       const [showCircle, setShowCircle] = useState(false);
       const [scrolling, setScrolling] = useState(false);
-      const [speed, setSpeed] = useState(40);
-      const [fontSize, setFontSize] = useState(16);
+      const [speed, setSpeed] = useState(25);
+      const [fontSize, setFontSize] = useState(14);
       const [capo, setCapo] = useState(song.capo); // local only — resets on exit
       const [showControls, setShowControls] = useState(true);
       const [contributeMsg, setContributeMsg] = useState('');
@@ -2206,10 +2206,12 @@
               {TABS.map(({ id, label, icon }) => (
                 <button key={id} onClick={() => setMainTab(id)}
                   style={{
-                    flex: 1, padding: '8px 0', minHeight: 54, background: 'transparent', border: 'none',
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, cursor: 'pointer'
+                    flex: 1, padding: '6px 0', minHeight: 54, border: 'none',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, cursor: 'pointer',
+                    background: mainTab === id ? 'var(--surface2)' : 'transparent',
+                    borderRadius: 12, margin: '4px 6px', transition: 'background 0.2s'
                   }}>
-                  <span style={{ fontSize: 18, lineHeight: 1 }}>{icon}</span>
+                  <span style={{ fontSize: 18, lineHeight: 1, color: mainTab === id ? 'var(--accent)' : 'var(--text-faint)' }}>{icon}</span>
                   <span style={{
                     fontSize: 10, fontFamily: "'Crimson Text',Georgia,serif", fontWeight: mainTab === id ? 700 : 400,
                     color: mainTab === id ? 'var(--accent)' : 'var(--text-faint)'
