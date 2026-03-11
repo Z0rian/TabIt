@@ -526,8 +526,25 @@
     }
 
     // ─── TAB IMPORTER ─────────────────────────────────────────────────────────────
+    function decodeHTMLEntities(text) {
+      if (!text) return '';
+      return text
+        .replace(/&rsquo;/g, "'")
+        .replace(/&lsquo;/g, "'")
+        .replace(/&rdquo;/g, '"')
+        .replace(/&ldquo;/g, '"')
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"')
+        .replace(/&#039;/g, "'")
+        .replace(/&ndash;/g, '-')
+        .replace(/&mdash;/g, '-')
+        .replace(/&hellip;/g, '...')
+        .replace(/&nbsp;/g, ' ');
+    }
+
     function parseTabImport(raw) {
-      const lines = raw.split('\n');
+      const decoded = decodeHTMLEntities(raw);
+      const lines = decoded.split('\n');
       let title = 'Imported Song', artist = 'Unknown', key = 'G', capo = 0;
       for (const line of lines) { const t = line.trim(); if (!t) continue; const m = t.match(/^(.+?)\s+(?:chords?\s+)?by\s+(.+?)$/i); if (m) { title = m[1].replace(/\s+chords?$/i, '').trim(); artist = m[2].trim(); } break; }
       for (const line of lines) { const t = line.trim(); const km = t.match(/^Key:\s*([A-G][#b]?m?)/i); if (km) key = km[1]; const cm = t.match(/^Capo[:\s]+(\d+)/i); if (cm) capo = parseInt(cm[1]); }

@@ -42,12 +42,12 @@ export default {
         const results = raw
           .filter(r => r.type === 'Chords' || r.type === 'Tab' || r.type === 'Pro')
           .map(r => ({
-            title:  r.song_name   ?? '',
+            title: r.song_name ?? '',
             artist: r.artist_name ?? '',
-            type:   r.type        ?? '',
-            rating: +(r.rating    ?? 0).toFixed(2),
-            votes:  r.votes       ?? 0,
-            url:    r.tab_url     ?? '',
+            type: r.type ?? '',
+            rating: +(r.rating ?? 0).toFixed(2),
+            votes: r.votes ?? 0,
+            url: r.tab_url ?? '',
           }));
 
         return json({ results });
@@ -95,7 +95,15 @@ function extractStore(html) {
   const decoded = match[1]
     .replace(/&quot;/g, '"')
     .replace(/&amp;/g, '&')
-    .replace(/&#039;/g, "'");
+    .replace(/&#039;/g, "'")
+    .replace(/&rsquo;/g, "'")
+    .replace(/&lsquo;/g, "'")
+    .replace(/&rdquo;/g, '"')
+    .replace(/&ldquo;/g, '"')
+    .replace(/&ndash;/g, '-')
+    .replace(/&mdash;/g, '-')
+    .replace(/&hellip;/g, '...')
+    .replace(/&nbsp;/g, ' ');
   return JSON.parse(decoded);
 }
 
