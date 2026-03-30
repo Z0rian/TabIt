@@ -1352,6 +1352,9 @@
       const [showControls, setShowControls] = useState(true);
       const [contributeMsg, setContributeMsg] = useState('');
       const [contributing, setContributing] = useState(false);
+      const [ytVideoId, setYtVideoId] = useState(null);
+      const [ytLoading, setYtLoading] = useState(false);
+      const [showYTPlayer, setShowYTPlayer] = useState(false);
       const scrollRef = useRef(null);
       const animRef = useRef(null);
       const speedRef = useRef(speed);
@@ -1361,7 +1364,7 @@
       const [swipeProg, setSwipeProg] = useState(0);
       speedRef.current = speed;
 
-      useEffect(() => { setCapo(song.capo); setSemitones(0); scrollAcc.current = 0; setScrolling(false); }, [song.id]);
+      useEffect(() => { setCapo(song.capo); setSemitones(0); scrollAcc.current = 0; setScrolling(false); setYtVideoId(null); setShowYTPlayer(false); }, [song.id]);
       const scroll = useCallback(() => {
         if (scrollRef.current) {
           // Base speed factor: 40px/sec at 100 BPM.
@@ -1404,6 +1407,27 @@
         catch (e) { setContributeMsg('❌ ' + e.message); }
         setContributing(false);
         setTimeout(() => setContributeMsg(''), 5000);
+      };
+
+      const handleYouTubeSearch = async () => {
+        if (ytVideoId) {
+          setShowYTPlayer(true);
+          return;
+        }
+        setYtLoading(true);
+        try {
+          const res = await fetch(`${UG_PROXY_URL}?action=youtube-search&q=${encodeURIComponent(song.title + ' ' + song.artist + ' original')}`);
+          const data = await res.json();
+          if (data.videoId) {
+            setYtVideoId(data.videoId);
+            setShowYTPlayer(true);
+          } else {
+            alert(data.error || 'Video not found');
+          }
+        } catch (e) {
+          alert('Could not search YouTube. Proxy might not be configured correctly.');
+        }
+        setYtLoading(false);
       };
 
       const displayKey = txChord(song.key, semitones, FLAT_SEMS.has(((n2s(song.key) + semitones) % 12 + 12) % 12));
@@ -1470,7 +1494,18 @@
               </div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                 <div style={{ color: 'var(--text-faint)', fontSize: 10 }}>Tap chord for diagram · tap lyrics to hide controls</div>
-                {canContribute && (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={handleYouTubeSearch} disabled={ytLoading}
+                    style={{
+                      background: 'none', border: '1px solid var(--border2)', borderRadius: 6,
+                      color: 'var(--text-sub)', fontSize: 11, padding: '3px 9px', cursor: 'pointer',
+                      fontFamily: "'Crimson Text',Georgia,serif", opacity: ytLoading ? 0.6 : 1, flexShrink: 0,
+                      display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap'
+                    }}>
+                    {ytLoading && <span className="spinner" style={{ width: 10, height: 10, borderTopColor: 'var(--text-sub)' }} />}
+                    <span style={{ color: '#ff0000' }}>▶</span> YouTube
+                  </button>
+                  {canContribute && (
                   <button onClick={handleContribute} disabled={contributing}
                     style={{
                       background: 'none', border: '1px solid var(--chord-border)', borderRadius: 6,
@@ -1482,6 +1517,7 @@
                     🌐 Contribute
                   </button>
                 )}
+                </div>
               </div>
               {contributeMsg && (
                 <div style={{ fontSize: 12, color: contributeMsg.startsWith('✅') ? '#1a7a3a' : contributeMsg.startsWith('❌') ? 'var(--danger)' : 'var(--text-sub)', fontWeight: 600 }}>
@@ -1500,6 +1536,38 @@
             ))}
             <div style={{ height: 40 }} />
           </div>
+
+          {showYTPlayer && ytVideoId && (
+            <div style={{
+              position: 'absolute',
+              bottom: 80,
+              right: 20,
+              width: 280,
+              background: 'var(--surface)',
+              border: '1.5px solid var(--border)',
+              borderRadius: 12,
+              padding: '6px',
+              boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+              zIndex: 300
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', marginBottom: 4, padding: '0 4px', cursor: 'grab' }}>
+                <div style={{ fontSize: 11, fontWeight: 'bold', color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ color: '#ff0000', fontSize: 14 }}>▶</span> YouTube
+                </div>
+                <button onClick={() => setShowYTPlayer(false)} style={{ background: 'none', border: 'none', color: 'var(--text-sub)', fontSize: 14, cursor: 'pointer', padding: '0 4px' }}>✕</button>
+              </div>
+              <iframe
+                width="100%"
+                height="158"
+                src={`https://www.youtube.com/embed/${ytVideoId}?autoplay=1`}
+                title="YouTube player"
+                frameBorder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                style={{ borderRadius: 8, background: '#000', display: 'block' }}
+              ></iframe>
+            </div>
+          )}
         </div>
       );
     }

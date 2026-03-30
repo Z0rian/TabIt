@@ -72,7 +72,25 @@ export default {
         return json({ content });
       }
 
-      return json({ error: 'Unknown action. Use action=search or action=tab' }, 400);
+      // ── YOUTUBE SEARCH ────────────────────────────────────────────────────
+      if (action === 'youtube-search') {
+        const q = url.searchParams.get('q');
+        if (!q) return json({ error: 'Missing q param' }, 400);
+
+        const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`;
+        const resp = await fetch(searchUrl, { headers: UG_HEADERS });
+        if (!resp.ok) return json({ error: `YouTube returned HTTP ${resp.status}` }, 500);
+        
+        const html = await resp.text();
+        const vidMatch = html.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
+        
+        if (vidMatch) {
+          return json({ videoId: vidMatch[1] });
+        }
+        return json({ error: 'No video found' }, 404);
+      }
+
+      return json({ error: 'Unknown action. Use action=search, action=tab, or action=youtube-search' }, 400);
 
     } catch (e) {
       return json({ error: e.message }, 500);
