@@ -548,7 +548,14 @@
       let title = 'Imported Song', artist = 'Unknown', key = 'G', capo = 0;
       for (const line of lines) { const t = line.trim(); if (!t) continue; const m = t.match(/^(.+?)\s+(?:chords?\s+)?by\s+(.+?)$/i); if (m) { title = m[1].replace(/\s+chords?$/i, '').trim(); artist = m[2].trim(); } break; }
       for (const line of lines) { const t = line.trim(); const km = t.match(/^Key:\s*([A-G][#b]?m?)/i); if (km) key = km[1]; const cm = t.match(/^Capo[:\s]+(\d+)/i); if (cm) capo = parseInt(cm[1]); }
-      const hasInline = lines.some(l => /\[[A-G][#b]?/.test(l) && !isSectionHdr(l.trim()));
+      // True inline = line has [Chord] markers AND meaningful non-bracket text on same line.
+      // A line with ONLY bracketed chords (e.g. "[Am]   [C]") is a chord-only line, not inline.
+      const hasInline = lines.some(l => {
+        if (!(/\[[A-G][#b]?/.test(l)) || isSectionHdr(l.trim())) return false;
+        // Strip all [bracketed] tokens and see if meaningful text remains
+        const stripped = l.replace(/\[[^\[\]]+\]/g, '').trim();
+        return stripped.length > 0;
+      });
       if (hasInline) { const si = lines.findIndex(l => isSectionHdr(l.trim()) || /\[[A-G][#b]?/.test(l)); return { title, artist, key, capo, tempo: 100, content: lines.slice(Math.max(0, si)).join('\n').trim() }; }
       let startIdx = lines.findIndex(l => { const t = l.trim(); return /^\[.+\]$/.test(t) && !isChord(t.slice(1, -1)); });
       if (startIdx === -1) startIdx = 0;
