@@ -85,9 +85,9 @@ export function view(route, { go }) {
     const btn = button('Set up sync', null, { cls: 'btn', type: 'submit' });
     return h('details', { class: 'sub-panel', open: route.query.has('setup') },
       h('summary', {}, 'First time? Set up sync (once, on your main device)'),
-      h('p', { class: 'hint' }, `Sync keeps your library on GitHub, encrypted, in a repository of its own (${cfg.owner}/${cfg.repo}), with a key that can only reach that repository. Signed in to GitHub:`),
+      h('p', { class: 'hint' }, `Sync keeps your library on GitHub, encrypted, in a second repository just for it (${cfg.owner}/${cfg.repo}, not TabIt's own), with a key that can only reach that one. Signed in to GitHub:`),
       h('ol', { class: 'steps' },
-        h('li', {}, 'Make the repository: open ', h('a', { href: repoUrl(), target: '_blank', rel: 'noopener' }, 'this pre-filled page'), ` (name `, h('b', {}, cfg.repo), ', ', h('b', {}, 'Public'), ': everything in it is encrypted) and press ', h('b', {}, 'Create repository'), '.'),
+        h('li', {}, 'Make a new, empty repository for your library (not a copy of TabIt: it starts empty and TabIt fills it). Open ', h('a', { href: repoUrl(), target: '_blank', rel: 'noopener' }, 'this pre-filled page'), ` (name `, h('b', {}, cfg.repo), ', ', h('b', {}, 'Public'), ': everything in it is encrypted) and press ', h('b', {}, 'Create repository'), '.'),
         h('li', {}, 'Make the key: open ', h('a', { href: tokenUrl(), target: '_blank', rel: 'noopener' }, 'this pre-filled key page'), '. Under ', h('b', {}, 'Repository access'), ' choose ', h('b', {}, 'Only select repositories'), ` → ${cfg.repo}, and check that `, h('b', {}, 'Contents'), ' is ', h('b', {}, 'Read and write'), '.'),
         h('li', {}, 'Press ', h('b', {}, 'Generate token'), ', copy it, paste it here.'),
         h('li', {}, 'Then add a password. Every other device signs in with just that password.')),

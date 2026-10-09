@@ -59,7 +59,7 @@ async function repoMissing(r) {
     return new RemoteError(`Your ${cfg.repo} repository is there, but this key can’t reach it. On GitHub, open the key and under Repository access choose “Only select repositories” → ${cfg.repo}. (A key made before the repository can’t see it until you add it.)`, 404, 'notfound',
       [{ href: KEYS_PAGE, text: 'Your keys on GitHub' }]);
   }
-  return new RemoteError(`GitHub has no public repository called ${cfg.repo} on your account (${cfg.owner}). Make it with the pre-filled page: name ${cfg.repo}, Public, then Create repository. If you made it private, make it public instead. Then add it to the key under Repository access, and try again.`, 404, 'notfound',
+  return new RemoteError(`GitHub has no public repository called ${cfg.repo} on your account (${cfg.owner}). TabIt keeps your library in this second repository, apart from TabIt itself: make it (empty) with step 1’s pre-filled page: name ${cfg.repo}, Public, then Create repository. If you made it private, make it public instead. Then add it to the key under Repository access, and try again.`, 404, 'notfound',
     [{ href: repoUrl(), text: `Make ${cfg.repo}` }, { href: KEYS_PAGE, text: 'Your keys on GitHub' }]);
 }
 // Checks a key before anything is saved with it.
