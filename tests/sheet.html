@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>TabIt sheet viewer</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="../styles.css">
+  <style>
+    body { padding: 0; }
+    .dev { padding: 10px 16px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 14px; border-bottom: 1px solid var(--line); }
+    .dev select, .dev input { min-height: 34px; padding: 4px 8px; }
+    #frame { margin: 0 auto; }
+    #report { white-space: pre-wrap; font: 12px/1.4 var(--font-mono); color: var(--ink-2); padding: 8px 16px; }
+  </style>
+</head>
+<body>
+  <div class="dev" id="dev">
+    <select id="pick" class="select" style="width:auto;max-width:320px"></select>
+    <label>width <input id="w" type="number" value="0" style="width:80px"></label>
+    <label>font <input id="fs" type="number" value="18" style="width:64px"></label>
+    <label><input id="mono" type="checkbox"> mono</label>
+    <label>transpose <input id="tr" type="number" value="0" style="width:56px"></label>
+    <select id="theme" class="select" style="width:auto"><option value="">system</option><option>light</option><option>dark</option><option>black</option></select>
+    <button id="check" class="btn btn-small">Check</button>
+  </div>
+  <div id="report"></div>
+  <div id="frame"><div class="song" id="song"></div></div>
+  <script type="module">
+    import { parseSong } from '../js/parse.js';
+    import { renderSheet, watchSheet } from '../js/sheet.js';
+    import { transposeChord, keyPrefersFlats, transposeKey } from '../js/theory.js';
+    import { checkSheet, expectedAnchors } from './align.js';
+
+    const $ = id => document.getElementById(id);
+    const params = new URLSearchParams(location.search);
+    let index = {};
+    let current = null;
+    let stop = null;
+
+    async function loadIndex() {
+      try { index = await (await fetch('corpus/index.json')).json(); } catch { index = {}; }
+      const keys = Object.keys(index);
+      $('pick').replaceChildren(...keys.map(k => new Option(k, k)));
+      return keys;
+    }
+
+    async function load(key) {
+      const rec = await (await fetch(`corpus/songs/${key}.json`)).json();
+      current = { key, rec };
+      draw();
+      return true;
+    }
+
+    function draw() {
+      if (!current) return;
+      const { rec } = current;
+      const src = rec.content || '';
+      const t = +$('tr').value || 0;
+      const key = rec.meta?.tonality || '';
+      const flats = keyPrefersFlats(key ? transposeKey(key, t) : 'C');
+      const doc = parseSong(src);
+      const sheet = renderSheet(doc, { chordName: n => transposeChord(n, t, flats), mono: $('mono').checked });
+      const song = $('song');
+      song.style.setProperty('--fs', ($('fs').value || 18) + 'px');
+      const w = +$('w').value;
+      $('frame').style.width = w ? w + 'px' : '';
+      if (stop) stop();
+      song.replaceChildren(sheet);
+      stop = watchSheet(sheet);
+      window.__doc = doc;
+    }
+
+    function check() {
+      const sheet = document.querySelector('.sheet');
+      const r = checkSheet(sheet);
+      const exp = current ? expectedAnchors(current.rec.content || '') : [];
+      r.expected = exp.length;
+      $('report').textContent = `${r.checked} chords checked, ${r.problems.length} problems\n` + r.problems.slice(0, 40).map(p => JSON.stringify(p)).join('\n');
+      return r;
+    }
+
+    window.__tabit = { load, draw, check, loadIndex, expectedAnchors, checkSheet,
+      set(opts) {
+        if ('w' in opts) $('w').value = opts.w;
+        if ('fs' in opts) $('fs').value = opts.fs;
+        if ('mono' in opts) $('mono').checked = !!opts.mono;
+        if ('tr' in opts) $('tr').value = opts.tr;
+        draw();
+      } };
+
+    for (const id of ['w', 'fs', 'mono', 'tr']) $(id).addEventListener('input', draw);
+    $('pick').addEventListener('change', e => load(e.target.value));
+    $('check').addEventListener('click', check);
+    $('theme').addEventListener('change', e => { if (e.target.value) document.documentElement.dataset.theme = e.target.value; else delete document.documentElement.dataset.theme; });
+    // every font loaded before anything is measured (the app re-fits when a late font arrives)
+    await Promise.all(['400 16px "Source Serif 4"', '700 16px "Bricolage Grotesque"', '400 16px "Bricolage Grotesque"', '400 16px "JetBrains Mono"', '700 16px "JetBrains Mono"'].map(f => document.fonts.load(f)));
+    const keys = await loadIndex();
+    if (params.get('nodev')) $('dev').hidden = true;
+    const first = params.get('song') || keys[0];
+    if (first) { $('pick').value = first; await load(first); }
+    window.__ready = true;
+  </script>
+</body>
+</html>

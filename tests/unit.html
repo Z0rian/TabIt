@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TabIt unit tests</title>
+  <link rel="icon" href="data:,">
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; margin: 16px; background: #fff; color: #111; }
+    .pass { color: #176c2f; } .fail { color: #b3261e; }
+    pre { white-space: pre-wrap; background: #f6f6f6; padding: 8px; border-radius: 6px; }
+    #sandbox { position: absolute; left: -10000px; top: 0; width: 600px; }
+  </style>
+</head>
+<body>
+  <h1>TabIt unit tests</h1>
+  <p id="summary">Running…</p>
+  <div id="out"></div>
+  <div id="sandbox"></div>
+  <script type="module">
+    import { run } from './harness.js';
+    import { files } from './all.js';
+    const params = new URLSearchParams(location.search);
+    const summary = document.getElementById('summary');
+    const out = document.getElementById('out');
+    try {
+      const { setFile, test } = await import('./harness.js');
+      const filter = params.get('filter') || '';
+      for (const f of files) {
+        if (filter && params.get('only') && !f.includes(params.get('only'))) continue;
+        setFile(f);
+        try {
+          await import(`./unit/${f}`);
+        } catch (e) {
+          // A broken file fails on its own instead of taking every other test down.
+          test('loads', () => { throw new Error(`could not import ${f}: ${e && e.message || e}`); });
+        }
+      }
+      const r = await run({ filter });
+      summary.className = r.failed ? 'fail' : 'pass';
+      summary.textContent = `${r.passed}/${r.count} passed in ${r.durationMs} ms`;
+      for (const f of r.failures) {
+        const p = document.createElement('pre');
+        p.className = 'fail';
+        p.textContent = `✗ [${f.file}] ${f.name}\n${f.error}\n${f.stack}`;
+        out.append(p);
+      }
+      window.__results = r;
+    } catch (e) {
+      summary.className = 'fail';
+      summary.textContent = 'Could not load the tests: ' + e;
+      window.__results = { passed: 0, failed: 1, count: 1, failures: [{ file: 'loader', name: 'import', error: String(e), stack: String(e.stack || '') }] };
+    }
+  </script>
+</body>
+</html>

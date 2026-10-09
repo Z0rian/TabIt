@@ -1,133 +1,191 @@
 /**
- * TabIt — Ultimate Guitar CORS Proxy
- * Cloudflare Worker
+ * TabIt — Ultimate Guitar proxy (Cloudflare Worker), version 2.
  *
- * Endpoints:
- *   ?action=search&q=QUERY      → search results JSON
- *   ?action=tab&url=TAB_URL     → tab content JSON
+ * Same endpoints as version 1, with more in every answer (older TabIt
+ * versions ignore the extra fields):
+ *   ?action=search&q=QUERY      → { results: [{ title, artist, type, rating, votes, url,
+ *                                    version, id, key, difficulty, cover }] }
+ *   ?action=tab&url=TAB_URL     → { content, meta: { capo, key, tuning, difficulty },
+ *                                    shapes: { chord: [[6 frets, low E first], …] },
+ *                                    strumming: [{ part, bpm, … }], song: { … } }
+ *   ?action=youtube-search&q=Q  → { videoId, duration (seconds), title }
+ *
+ * Deploy: Cloudflare dashboard → Workers & Pages → ug-proxy → Edit code →
+ * paste this file → Deploy. Nothing else changes.
  */
 
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-};
+// Pages allowed to call the proxy from a browser (anything else gets no CORS headers).
+const ALLOWED_ORIGINS = [
+  'https://z0rian.github.io',
+  /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/,
+];
 
 const UG_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
   'Accept-Language': 'en-US,en;q=0.9',
 };
 
+// How long answers are cached at Cloudflare's edge (kinder to Ultimate Guitar).
+const TTL = { search: 3600, tab: 86400, 'youtube-search': 86400 };
+const TYPES = new Set(['Chords', 'Tabs', 'Pro', 'Ukulele Chords']);
+
 export default {
-  async fetch(request) {
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { headers: CORS });
-    }
+  async fetch(request, env, ctx) {
+    const origin = request.headers.get('Origin') || '';
+    const cors = corsFor(origin);
+    if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
+    if (request.method !== 'GET') return json({ error: 'GET only' }, 405, cors);
 
     const url = new URL(request.url);
     const action = url.searchParams.get('action');
+    if (!TTL[action]) return json({ error: 'Unknown action. Use action=search, action=tab, or action=youtube-search' }, 400, cors);
 
+    // edge cache, keyed by the request without the Origin
+    const cache = caches.default;
+    const key = new Request(url.toString(), { method: 'GET' });
+    const hit = await cache.match(key);
+    if (hit) return withCors(hit, cors);
+
+    let res;
     try {
-      // ── SEARCH ────────────────────────────────────────────────────────────
-      if (action === 'search') {
-        const q = url.searchParams.get('q');
-        if (!q) return json({ error: 'Missing q param' }, 400);
-
-        const searchUrl = `https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(q)}`;
-        const html = await fetchUG(searchUrl);
-        const store = extractStore(html);
-
-        const raw = store?.store?.page?.data?.results ?? [];
-        const results = raw
-          .filter(r => r.type === 'Chords' || r.type === 'Tab' || r.type === 'Pro')
-          .map(r => ({
-            title: r.song_name ?? '',
-            artist: r.artist_name ?? '',
-            type: r.type ?? '',
-            rating: +(r.rating ?? 0).toFixed(2),
-            votes: r.votes ?? 0,
-            url: r.tab_url ?? '',
-          }));
-
-        return json({ results });
-      }
-
-      // ── FETCH TAB ─────────────────────────────────────────────────────────
-      if (action === 'tab') {
-        const tabUrl = url.searchParams.get('url');
-        if (!tabUrl) return json({ error: 'Missing url param' }, 400);
-
-        const html = await fetchUG(tabUrl);
-        const store = extractStore(html);
-
-        // UG nests the content a few different ways depending on tab type
-        const pageData = store?.store?.page?.data ?? {};
-        const content =
-          pageData?.tab_view?.wiki_tab?.content ??
-          pageData?.tab?.content ??
-          '';
-
-        if (!content) return json({ error: 'Tab content not found on page' }, 404);
-        return json({ content });
-      }
-
-      // ── YOUTUBE SEARCH ────────────────────────────────────────────────────
-      if (action === 'youtube-search') {
-        const q = url.searchParams.get('q');
-        if (!q) return json({ error: 'Missing q param' }, 400);
-
-        const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`;
-        const resp = await fetch(searchUrl, { headers: UG_HEADERS });
-        if (!resp.ok) return json({ error: `YouTube returned HTTP ${resp.status}` }, 500);
-        
-        const html = await resp.text();
-        const vidMatch = html.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
-        
-        if (vidMatch) {
-          return json({ videoId: vidMatch[1] });
-        }
-        return json({ error: 'No video found' }, 404);
-      }
-
-      return json({ error: 'Unknown action. Use action=search, action=tab, or action=youtube-search' }, 400);
-
+      if (action === 'search') res = await search(url.searchParams.get('q'));
+      else if (action === 'tab') res = await tab(url.searchParams.get('url'));
+      else res = await youtube(url.searchParams.get('q'));
     } catch (e) {
-      return json({ error: e.message }, 500);
+      return json({ error: e.message || String(e) }, 502, cors);
     }
-  }
+    const out = json(res.body, res.status || 200, { 'Cache-Control': `public, max-age=${TTL[action]}` });
+    if ((res.status || 200) === 200) ctx.waitUntil(cache.put(key, out.clone()));
+    return withCors(out, cors);
+  },
 };
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
+async function search(q) {
+  if (!q) return { status: 400, body: { error: 'Missing q param' } };
+  const page = await fetchText(`https://www.ultimate-guitar.com/search.php?search_type=title&value=${encodeURIComponent(q)}`);
+  const data = store(page)?.store?.page?.data ?? {};
+  const results = (data.results ?? [])
+    .filter(r => TYPES.has(r.type))
+    .map(r => ({
+      title: r.song_name ?? '',
+      artist: r.artist_name ?? '',
+      type: r.type ?? '',
+      rating: +(+(r.rating ?? 0)).toFixed(2),
+      votes: r.votes ?? 0,
+      url: r.tab_url ?? '',
+      version: r.version ?? null,
+      id: r.id ?? null,
+      key: r.tonality_name || '',
+      difficulty: r.difficulty || '',
+      cover: r.album_cover?.web_album_cover?.small || '',
+    }));
+  return { body: { results } };
+}
 
-async function fetchUG(url) {
-  const resp = await fetch(url, { headers: UG_HEADERS });
-  if (!resp.ok) throw new Error(`UG returned HTTP ${resp.status} for ${url}`);
+async function tab(tabUrl) {
+  if (!tabUrl) return { status: 400, body: { error: 'Missing url param' } };
+  let u;
+  try { u = new URL(tabUrl); } catch { return { status: 400, body: { error: 'Bad url' } }; }
+  if (!/(^|\.)ultimate-guitar\.com$/.test(u.hostname)) return { status: 400, body: { error: 'Only ultimate-guitar.com tabs' } };
+  const page = await fetchText(u.toString());
+  const data = store(page)?.store?.page?.data ?? {};
+  const view = data.tab_view ?? {};
+  const t = data.tab ?? {};
+  const content = view.wiki_tab?.content ?? data.tab?.content ?? '';
+  if (!content) return { status: 404, body: { error: 'Tab content not found on page' } };
+  const meta = view.meta ?? {};
+  const shapes = {};
+  for (const [name, list] of Object.entries(view.applicature ?? {})) {
+    if (!Array.isArray(list)) continue;
+    const s = list.slice(0, 4).filter(v => Array.isArray(v.frets) && v.frets.length === 6).map(v => [...v.frets].reverse().map(f => (f < 0 ? -1 : f)));
+    if (s.length) shapes[name] = s;
+  }
+  return {
+    body: {
+      content,
+      meta: { capo: meta.capo ?? null, key: meta.tonality || t.tonality_name || '', tuning: meta.tuning?.value || '', difficulty: t.difficulty || '' },
+      shapes,
+      strumming: (view.strummings ?? []).map(s => ({ part: s.part, bpm: s.bpm, denominator: s.denuminator, triplet: !!s.is_triplet, measures: (s.measures ?? []).map(m => m.measure) })),
+      song: { title: t.song_name || '', artist: t.artist_name || '', version: t.version ?? null, rating: t.rating ?? null, votes: t.votes ?? null, id: t.id ?? null, type: t.type || '' },
+    },
+  };
+}
+
+async function youtube(q) {
+  if (!q) return { status: 400, body: { error: 'Missing q param' } };
+  const page = await fetchText(`https://www.youtube.com/results?search_query=${encodeURIComponent(q)}`, false);
+  // the first real video in the search page's data
+  const m = page.match(/var ytInitialData = (\{.+?\});<\/script>/s);
+  if (m) {
+    try {
+      const d = JSON.parse(m[1]);
+      const v = findVideo(d);
+      if (v) return { body: v };
+    } catch { /* fall back to the plain match below */ }
+  }
+  const id = page.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
+  if (id) return { body: { videoId: id[1], duration: null, title: '' } };
+  return { status: 404, body: { error: 'No video found' } };
+}
+
+function findVideo(node, depth = 0) {
+  if (!node || typeof node !== 'object' || depth > 40) return null;
+  if (node.videoRenderer?.videoId) {
+    const r = node.videoRenderer;
+    return { videoId: r.videoId, duration: seconds(r.lengthText?.simpleText), title: r.title?.runs?.[0]?.text || '' };
+  }
+  for (const v of Array.isArray(node) ? node : Object.values(node)) {
+    const found = findVideo(v, depth + 1);
+    if (found) return found;
+  }
+  return null;
+}
+
+function seconds(t) {
+  if (!t) return null;
+  const parts = String(t).split(':').map(Number);
+  if (parts.some(n => Number.isNaN(n))) return null;
+  return parts.reduce((a, b) => a * 60 + b, 0);
+}
+
+async function fetchText(url, ug = true) {
+  const resp = await fetch(url, { headers: UG_HEADERS, cf: { cacheTtl: 300 } });
+  if (!resp.ok) throw new Error(`${ug ? 'Ultimate Guitar' : 'YouTube'} returned HTTP ${resp.status}`);
   return resp.text();
 }
 
-function extractStore(html) {
-  // UG embeds all page state as HTML-entity-encoded JSON in data-content
+function store(html) {
+  // all page state is HTML-encoded JSON in data-content
   const match = html.match(/class="js-store"\s+data-content="([^"]+)"/);
   if (!match) throw new Error('Could not find js-store data on page — UG may have changed structure');
-  const decoded = match[1]
-    .replace(/&quot;/g, '"')
-    .replace(/&amp;/g, '&')
-    .replace(/&#039;/g, "'")
-    .replace(/&rsquo;/g, "'")
-    .replace(/&lsquo;/g, "'")
-    .replace(/&rdquo;/g, '"')
-    .replace(/&ldquo;/g, '"')
-    .replace(/&ndash;/g, '-')
-    .replace(/&mdash;/g, '-')
-    .replace(/&hellip;/g, '...')
-    .replace(/&nbsp;/g, ' ');
-  return JSON.parse(decoded);
+  return JSON.parse(decodeEntities(match[1]));
 }
 
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { ...CORS, 'Content-Type': 'application/json' },
+function decodeEntities(s) {
+  return s.replace(/&(#\d+|#x[0-9a-f]+|quot|amp|lt|gt|apos|#039|nbsp|rsquo|lsquo|rdquo|ldquo|ndash|mdash|hellip);/gi, (m, e) => {
+    const k = e.toLowerCase();
+    const named = { quot: '"', amp: '&', lt: '<', gt: '>', apos: "'", '#039': "'", nbsp: ' ', rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“', ndash: '–', mdash: '—', hellip: '…' };
+    if (named[k] !== undefined) return named[k];
+    const n = k[1] === 'x' ? parseInt(k.slice(2), 16) : parseInt(k.slice(1), 10);
+    return Number.isFinite(n) ? String.fromCodePoint(n) : m;
   });
 }
+
+function corsFor(origin) {
+  const ok = ALLOWED_ORIGINS.some(o => (typeof o === 'string' ? o === origin : o.test(origin)));
+  return ok ? { 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Methods': 'GET, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', Vary: 'Origin' } : {};
+}
+
+function withCors(res, cors) {
+  const out = new Response(res.body, res);
+  for (const [k, v] of Object.entries(cors)) out.headers.set(k, v);
+  return out;
+}
+
+function json(data, status = 200, headers = {}) {
+  return new Response(JSON.stringify(data), { status, headers: { ...headers, 'Content-Type': 'application/json' } });
+}
+
+// for tests (tests/unit/worker.test.js)
+export { search, tab, youtube, findVideo, seconds, decodeEntities, corsFor };

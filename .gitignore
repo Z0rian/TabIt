@@ -1,0 +1,6 @@
+# Local-only test data (copyrighted song text), screenshots and caches
+tests/corpus/*
+!tests/corpus/.gitignore
+tests/out/
+__pycache__/
+*.pyc

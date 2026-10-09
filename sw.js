@@ -1,23 +1,118 @@
-const CACHE = 'tabit-v2';
-const SHELL = ['./', './manifest.json', './icons/icon-192.png', './icons/icon-512.png'];
+// TabIt's service worker: the whole app is cached when it installs, so TabIt
+// starts with no connection at all. Songs live in IndexedDB (not here).
+//
+// Only caches named "tabit-…" are ever touched: other apps on the same site
+// (z0rian.github.io/ranch-projects) keep theirs.
+//
+// The list below is written by scripts/build.py. Run it before committing.
 
-self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+// BUILD-START
+const BUILD = '97c7b0bb09';
+const PRECACHE = [
+  './',
+  'index.html',
+  'styles.css',
+  'manifest.json',
+  'js/account.js',
+  'js/app.js',
+  'js/audio.js',
+  'js/autoscroll.js',
+  'js/crypto.js',
+  'js/db.js',
+  'js/diagram.js',
+  'js/importer.js',
+  'js/migrate.js',
+  'js/model.js',
+  'js/parse.js',
+  'js/pitch.js',
+  'js/prefs.js',
+  'js/remote.js',
+  'js/session.js',
+  'js/sheet.js',
+  'js/store.js',
+  'js/theory.js',
+  'js/ug.js',
+  'js/ui.js',
+  'js/version.js',
+  'js/voicings.js',
+  'js/youtube.js',
+  'js/views/chords.js',
+  'js/views/chordsheet.js',
+  'js/views/common.js',
+  'js/views/editor.js',
+  'js/views/import.js',
+  'js/views/library.js',
+  'js/views/settings.js',
+  'js/views/song.js',
+  'js/views/tuner.js',
+  'fonts/bricolage-grotesque.woff2',
+  'fonts/jetbrains-mono.woff2',
+  'fonts/source-serif-4.woff2',
+  'icons/icon-192.png',
+  'icons/apple-touch-icon.png',
+  'icons/favicon-32.png'
+];
+// BUILD-END
+
+const CACHE = `tabit-app-${BUILD}`;
+const IMAGES = 'tabit-images';
+
+self.addEventListener('install', event => {
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE);
+    // straight from the network, not the browser's HTTP cache
+    await cache.addAll(PRECACHE.map(p => new Request(p, { cache: 'reload' })));
+  })());
 });
-self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+
+self.addEventListener('activate', event => {
+  event.waitUntil((async () => {
+    for (const k of await caches.keys()) {
+      if (k.startsWith('tabit-app-') && k !== CACHE) await caches.delete(k);
+      // the old TabIt's cache
+      if (k === 'tabit-v2' || k === 'tabit-v1') await caches.delete(k);
+    }
+    await self.clients.claim();
+  })());
 });
-self.addEventListener('fetch', e => {
-  const url = new URL(e.request.url);
-  // Network-first for GitHub API / raw.githubusercontent / CDN
-  if (url.hostname !== self.location.hostname) {
-    e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
+
+self.addEventListener('message', event => {
+  if (event.data === 'skip-waiting') self.skipWaiting();
+});
+
+self.addEventListener('fetch', event => {
+  const req = event.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+
+  if (url.origin === self.location.origin) {
+    // the app itself: from the cache, instantly, online or not
+    if (req.mode === 'navigate') {
+      event.respondWith(caches.match('index.html', { cacheName: CACHE }).then(hit => hit || fetch(req)));
+      return;
+    }
+    event.respondWith(caches.match(req, { cacheName: CACHE }).then(hit => hit || fetch(req)));
     return;
   }
-  // Cache-first for same-origin (app shell)
-  e.respondWith(caches.match(e.request).then(hit => hit || fetch(e.request).then(res => {
-    const clone = res.clone();
-    caches.open(CACHE).then(c => c.put(e.request, clone));
-    return res;
-  })));
+
+  // album covers: keep a copy so the library looks the same offline
+  if (req.destination === 'image' && /ultimate-guitar\.com$|ytimg\.com$/.test(url.hostname)) {
+    event.respondWith(staleWhileRevalidate(req));
+  }
+  // everything else (Ultimate Guitar, GitHub, YouTube) goes straight to the network
 });
+
+async function staleWhileRevalidate(req) {
+  const cache = await caches.open(IMAGES);
+  const hit = await cache.match(req);
+  const fresh = fetch(req).then(res => {
+    if (res && (res.ok || res.type === 'opaque')) cache.put(req, res.clone()).then(() => trim(cache));
+    return res;
+  }).catch(() => hit);
+  return hit || fresh;
+}
+
+async function trim(cache, max = 400) {
+  const keys = await cache.keys();
+  for (let i = 0; i < keys.length - max; i++) await cache.delete(keys[i]);
+}

@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "tabit-dev",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["scripts/serve.py", "8090"],
+      "port": 8090,
+      "url": "http://localhost:8090"
+    }
+  ]
+}

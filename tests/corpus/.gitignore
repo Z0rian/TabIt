@@ -1,0 +1,4 @@
+# Local test data: the owner's song list and fetched tabs (copyrighted lyrics).
+# Never commit or publish.
+*
+!.gitignore
