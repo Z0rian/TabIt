@@ -1,11 +1,12 @@
 // Signing in, the same way as the Ranch app: the owner makes one GitHub key
-// once; each password stored in access.json (on the data branch, public)
+// once; each password stored in access.json (in the public data repository)
 // unlocks an encrypted copy of that key plus the key that encrypts the library.
-// A new device only needs a password.
+// A new device only needs a password. The GitHub key only reaches the data
+// repository, so a guessed password can't be used to change the app itself.
 
 import { RemoteError } from './remote.js';
 import { sealWithPassword, openWithPassword, sealWithToken, openWithToken, newLibraryKey } from './crypto.js';
-import { remote, startSync, pull, getAuth, setAuth, store, deviceName, cfg, useMock } from './store.js';
+import { remote, startSync, pull, getAuth, setAuth, store, deviceName, cfg, useMock, syncNow } from './store.js';
 import { newId } from './model.js';
 
 export const ACCESS_PATH = 'access.json';
@@ -26,11 +27,21 @@ async function readAccess(r) {
   try { return JSON.parse(text); } catch { throw new RemoteError('The sign-in file on GitHub is damaged.', 0, 'parse'); }
 }
 
-// Pre-filled page for making a fine-grained key that can only touch this repository.
+// Pre-filled page for making the repository that holds the library.
+export function repoUrl() {
+  const q = new URLSearchParams({ name: cfg.repo, owner: cfg.owner, visibility: 'public', description: 'TabIt song library, encrypted. Synced by the TabIt app.' });
+  return `https://github.com/new?${q}`;
+}
+
+const cantSee = () => `GitHub can’t find ${cfg.owner}/${cfg.repo} with this key. Check that you made that repository (step 1) and picked it under “Repository access” when making the key.`;
+const today = () => new Date().toISOString().slice(0, 10);
+
+// Pre-filled page for making a fine-grained key that can only touch that repository.
 export function tokenUrl() {
   const q = new URLSearchParams({
     name: `TabIt sync ${Math.random().toString(36).slice(2, 6)}`,
-    description: 'Lets TabIt sync your song library between devices.',
+    description: `Lets TabIt sync your song library between devices (only ${cfg.repo}).`,
+    target_name: cfg.owner,
     expires_in: 'none',
     contents: 'write',
   });
@@ -51,14 +62,15 @@ export async function setupWithKey(token) {
   if (!token) throw new RemoteError('Paste the key first.', 0, 'input');
   const r = remote(token);
   const perm = await r.canWrite().catch(e => {
-    if (e.kind === 'notfound') throw new RemoteError(`This key can’t see ${cfg.owner}/${cfg.repo}. Under “Repository access”, pick that repository.`, 404, 'notfound');
+    if (e.kind === 'notfound') throw new RemoteError(cantSee(), 404, 'notfound');
     throw e;
   });
   if (!perm.push) throw new RemoteError('This key can read but not save. Set Contents to “Read and write”.', 403, 'forbidden');
+  if (perm.private) throw new RemoteError(`${cfg.owner}/${cfg.repo} is private, so your other devices couldn’t sign in with a password. Make it public in its Settings (everything TabIt saves there is encrypted), then try again.`, 0, 'private');
   const login = await r.whoami();
   // Read with the key (not anonymously): if the repository were private an
   // anonymous read would look like "nothing there" and setup would overwrite it.
-  const head = await r.head();
+  const head = (await r.isEmpty()) ? null : await r.head();
   let access = await readAccessAt(r, head);
   let libKey;
   if (!access && head && (await r.files(head))['library/index.json']) {
@@ -139,7 +151,7 @@ async function readAccessAt(r, head) {
 }
 
 async function writeAccess(r, access, message) {
-  const head = await r.head();
+  const head = (await r.isEmpty()) ? null : await r.head();
   await r.commit({ parent: head, files: { [ACCESS_PATH]: JSON.stringify(access, null, 2) + '\n' }, message });
 }
 
@@ -157,7 +169,7 @@ export async function addPassword(password, label) {
       if (await openWithPassword(e, password)) throw new RemoteError('That password is already on the list.', 0, 'duplicate');
     }
     const sealed = await sealWithPassword({ v: 1, token: auth.token, libKey: auth.libKey }, password);
-    access.entries.push({ id: newId('pw'), label: String(label || '').trim() || `Password ${access.entries.length + 1}`, added: new Date().toISOString().slice(0, 10), device: deviceName(), ...sealed });
+    access.entries.push({ id: newId('pw'), label: String(label || '').trim() || `Password ${access.entries.length + 1}`, added: today(), device: deviceName(), ...sealed });
     if (!access.owner && auth.via === 'key') access.owner = await sealWithToken({ v: 1, libKey: auth.libKey }, auth.token);
   }, `Added a sign-in password (${label || 'unnamed'})`);
 }
@@ -169,25 +181,49 @@ export async function removePassword(id) {
 }
 
 // Switch every password to a new GitHub key (after the old one was deleted or
-// expired). The device must still be signed in, so it knows the library key;
-// the passwords themselves have to be typed again.
-export async function replaceKey(newToken, passwords) {
+// expired). The device must still be signed in, so it knows the library key.
+// Passwords are never stored, so each one to keep is typed again: `typed` is
+// [{ id, password }] for entries in access.json. Any left out stop working.
+export async function replaceKey(newToken, typed) {
   const auth = getAuth();
   if (!auth) throw new RemoteError('Sign in first.', 0, 'auth');
-  newToken = newToken.trim();
+  newToken = String(newToken || '').trim();
+  if (!newToken) throw new RemoteError('Paste the new key first.', 0, 'input');
+  const keep = typed.filter(t => String(t.password || '').trim());
+  if (!keep.length) throw new RemoteError('Type at least one of your passwords, so your other devices can still sign in.', 0, 'input');
   const r = remote(newToken);
-  const perm = await r.canWrite();
+  const perm = await r.canWrite().catch(e => {
+    if (e.kind === 'notfound') throw new RemoteError(cantSee(), 404, 'notfound');
+    throw e;
+  });
   if (!perm.push) throw new RemoteError('The new key can’t save. Set Contents to “Read and write”.', 403, 'forbidden');
-  const head = await r.head();
-  const access = (await readAccessAt(r, head)) || emptyAccess();
-  access.owner = await sealWithToken({ v: 1, libKey: auth.libKey }, newToken);
-  access.entries = [];
-  for (const { password, label } of passwords) {
-    const sealed = await sealWithPassword({ v: 1, token: newToken, libKey: auth.libKey }, password);
-    access.entries.push({ id: newId('pw'), label, added: new Date().toISOString().slice(0, 10), device: deviceName(), ...sealed });
+  let checked = false;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const head = await r.head();
+    const access = (await readAccessAt(r, head)) || emptyAccess();
+    const entries = [];
+    for (const t of keep) {
+      const old = access.entries.find(e => e.id === t.id);
+      if (old && !checked && !(await openWithPassword(old, t.password))) {
+        throw new RemoteError(`That isn’t the password for “${old.label}”. (To change a password, add the new one afterwards.)`, 0, 'badpassword');
+      }
+      const sealed = await sealWithPassword({ v: 1, token: newToken, libKey: auth.libKey }, t.password);
+      entries.push({ id: old?.id || newId('pw'), label: old?.label || 'Password', added: old?.added || today(), device: old?.device || deviceName(), ...sealed });
+    }
+    checked = true;
+    access.owner = await sealWithToken({ v: 1, libKey: auth.libKey }, newToken);
+    access.entries = entries;
+    try {
+      await r.commit({ parent: head, files: { [ACCESS_PATH]: JSON.stringify(access, null, 2) + '\n' }, message: 'Switched TabIt sync to a new key' });
+    } catch (e) {
+      if (e.kind === 'conflict') continue;
+      throw e;
+    }
+    setAuth({ ...auth, token: newToken, via: 'key' });
+    syncNow();
+    return;
   }
-  await r.commit({ parent: head, files: { [ACCESS_PATH]: JSON.stringify(access, null, 2) + '\n' }, message: 'Switched TabIt sync to a new key' });
-  setAuth({ ...auth, token: newToken, via: 'key' });
+  throw new RemoteError('Another device was saving at the same moment. Try again.', 409, 'conflict');
 }
 
 export const isMock = () => useMock;

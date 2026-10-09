@@ -4,7 +4,7 @@
 //    key + the library key) with AES-GCM under a key stretched from the
 //    password (PBKDF2-SHA256, 600k rounds), the same scheme as the Ranch app.
 //  - The library itself is gzipped and AES-GCM encrypted with the library key,
-//    because the repository (and so the data branch) is public.
+//    because the data repository is public.
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();

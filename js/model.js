@@ -9,12 +9,12 @@
 //  { t: 'set', id, set: { field: value } }  change song fields (undefined/null deletes)
 //  { t: 'view', id, set: { tr, capo, … } }  per-song view settings, merged
 //  { t: 'del', id }                         delete a song (also leaves setlists)
-//  { t: 'list', id, set: { name, songs } }  create/change a setlist
+//  { t: 'list', id, set: { name, songs } }  create (needs a name)/change a setlist
 //  { t: 'list-del', id }
 //  { t: 'prefs', set: { … } }               synced settings
 //  { t: 'many', ops: [...] }
 
-export const SONG_FIELDS = ['title', 'artist', 'kind', 'content', 'src', 'key', 'capo', 'tuning', 'bpm', 'duration', 'durationFrom', 'yt', 'fav', 'added', 'edited', 'played', 'plays', 'notes', 'view', 'shapes', 'cover'];
+export const SONG_FIELDS = ['title', 'artist', 'kind', 'content', 'src', 'key', 'capo', 'tuning', 'bpm', 'duration', 'durationFrom', 'yt', 'fav', 'added', 'edited', 'played', 'plays', 'notes', 'view', 'shapes', 'strum', 'cover'];
 
 export function emptyLibrary() {
   return { v: 1, songs: {}, setlists: {}, prefs: {} };
@@ -74,6 +74,8 @@ export function applyOp(lib, op) {
       return { ...lib, songs, setlists };
     }
     case 'list': {
+      // a change to a setlist another device deleted doesn't bring it back
+      if (!lib.setlists[op.id] && !op.set?.name) return lib;
       const cur = lib.setlists[op.id] || { id: op.id, name: 'Setlist', songs: [], created: new Date().toISOString() };
       const next = { ...cur, ...op.set, id: op.id };
       next.songs = (next.songs || []).filter((x, i, a) => a.indexOf(x) === i);
@@ -139,6 +141,41 @@ export function invertOp(lib, op) {
     }
     default: return { t: 'many', ops: [] };
   }
+}
+
+// The ops that turn library `from` into `to`, field by field, so applying them
+// to a third copy changes only what changed here.
+export function diffOps(from, to) {
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const changed = (a = {}, b = {}) => {
+    const set = {};
+    for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) if (!same(a[k], b[k])) set[k] = b[k] ?? null;
+    return set;
+  };
+  const ops = [];
+  for (const [id, s] of Object.entries(to.songs)) {
+    const old = from.songs[id];
+    if (!old) { ops.push({ t: 'add', song: s }); continue; }
+    const { view: v0, ...a } = old;
+    const { view: v1, ...b } = s;
+    const set = changed(a, b);
+    delete set.id;
+    if (Object.keys(set).length) ops.push({ t: 'set', id, set });
+    const view = changed(v0, v1);
+    if (Object.keys(view).length) ops.push({ t: 'view', id, set: view });
+  }
+  for (const id of Object.keys(from.songs)) if (!to.songs[id]) ops.push({ t: 'del', id });
+  for (const [id, l] of Object.entries(to.setlists)) {
+    const old = from.setlists[id];
+    if (!old) { ops.push({ t: 'list', id, set: { ...l } }); continue; }
+    const set = changed(old, l);
+    delete set.id;
+    if (Object.keys(set).length) ops.push({ t: 'list', id, set });
+  }
+  for (const id of Object.keys(from.setlists)) if (!to.setlists[id]) ops.push({ t: 'list-del', id });
+  const prefs = changed(from.prefs, to.prefs);
+  if (Object.keys(prefs).length) ops.push({ t: 'prefs', set: prefs });
+  return ops;
 }
 
 // Makes a library read from storage or the network safe to use.

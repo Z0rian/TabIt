@@ -2,7 +2,7 @@
 
 import { h, icon, iconButton, button, toast, seg, fill } from '../ui.js';
 import { parseTCList } from '../ug.js';
-import { startImport, cancelImport, clearImport, importJob, subscribeImport, resumeImport, songsFromFile, addSongs } from '../importer.js';
+import { startImport, cancelImport, clearImport, importJob, subscribeImport, resumeImport, readBackup, addSongs } from '../importer.js';
 import { store } from '../store.js';
 
 const STATUS = { waiting: ['clock', 'Waiting'], working: ['sync', 'Finding…'], done: ['check', ''], close: ['check', ''], skipped: ['check', ''], notfound: ['close', ''], failed: ['close', ''] };
@@ -91,10 +91,10 @@ export function view(route, { go, back }) {
       const f = input.files?.[0];
       if (!f) return;
       try {
-        const songs = songsFromFile(await f.text());
-        const { added, skipped } = addSongs(songs);
-        toast(`${added} song${added === 1 ? '' : 's'} added${skipped ? `, ${skipped} already there` : ''}`);
-        if (added) go('#/');
+        const { songs, setlists } = readBackup(await f.text());
+        const res = addSongs(songs, setlists);
+        toast(addedText(res));
+        if (res.added || res.lists) go('#/');
       } catch (e) {
         toast(e.message || 'Couldn’t read that file.');
       }
@@ -113,8 +113,10 @@ export function view(route, { go, back }) {
       const f = e.dataTransfer.files?.[0];
       if (!f) return;
       try {
-        const { added, skipped } = addSongs(songsFromFile(await f.text()));
-        toast(`${added} song${added === 1 ? '' : 's'} added${skipped ? `, ${skipped} already there` : ''}`);
+        const { songs, setlists } = readBackup(await f.text());
+        const res = addSongs(songs, setlists);
+        toast(addedText(res));
+        if (res.added || res.lists) go('#/');
       } catch (err) { toast(err.message); }
     });
     fill(body, drop, h('p', { class: 'hint' }, `Your library has ${Object.keys(store.lib.songs).length} songs. Nothing is replaced; songs you already have are skipped.`));
@@ -122,4 +124,11 @@ export function view(route, { go, back }) {
 
   draw();
   return { el, title: 'Import', tab: 'library', destroy() { unsub?.(); } };
+}
+
+function addedText({ added, skipped, lists }) {
+  const parts = [`${added} song${added === 1 ? '' : 's'} added`];
+  if (lists) parts.push(`${lists} setlist${lists === 1 ? '' : 's'}`);
+  if (skipped) parts.push(`${skipped} already there`);
+  return parts.join(', ');
 }

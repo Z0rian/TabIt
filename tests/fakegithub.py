@@ -1,7 +1,8 @@
 """A fake GitHub REST API: just the calls TabIt makes, with the same rules (a
 branch only moves forward, writes need a valid key, anyone can read a public
-file). Lets several browsers — a "phone" and a "laptop" — sync through the
-real GitHub client code in js/remote.js.
+file, and a brand-new repository is empty: the Git Data API refuses to work
+until a file has been written the ordinary way). Lets several browsers — a
+"phone" and a "laptop" — sync through the real GitHub client code in js/remote.js.
 
     from fakegithub import FakeGitHub
     gh = FakeGitHub(tokens={'tok-owner'}); url = gh.start()
@@ -17,9 +18,13 @@ from urllib.parse import urlparse
 
 
 class FakeGitHub:
-    def __init__(self, tokens=(), login='test-owner'):
+    def __init__(self, tokens=(), login='test-owner', private=False, default_branch='main'):
         self.tokens = set(tokens)
         self.login = login
+        self.private = private
+        # a repository whose default branch isn't "main" puts its first file
+        # there, whatever branch is asked for
+        self.default_branch = default_branch
         self.blobs = {}  # sha -> bytes
         self.trees = {}  # sha -> {path: blob sha}
         self.commits = {}  # sha -> {tree, parents, message}
@@ -42,7 +47,12 @@ class FakeGitHub:
         self.trees[sha] = dict(files)
         return sha
 
-    def files_at(self, branch='tabit-data'):
+    def put_commit(self, tree, parents, message):
+        sha = self._sha('commit', (tree + ''.join(parents) + message + str(len(self.commits))).encode())
+        self.commits[sha] = {'tree': tree, 'parents': parents, 'message': message}
+        return sha
+
+    def files_at(self, branch='main'):
         c = self.refs.get(branch)
         if not c:
             return {}
@@ -93,11 +103,16 @@ class FakeGitHub:
             def do_PATCH(self):
                 self._route('PATCH')
 
+            def do_PUT(self):
+                self._route('PUT')
+
             def _route(self, method):
                 if fake.offline:
                     self.close_connection = True
                     return
-                path = urlparse(self.path).path
+                u = urlparse(self.path)
+                path = u.path
+                self.query = dict(q.split('=', 1) for q in u.query.split('&') if '=' in q)
                 a = self.headers.get('Authorization', '')
                 if a and not self._authed():
                     return self._send(401, {'message': 'Bad credentials'})
@@ -116,7 +131,12 @@ class FakeGitHub:
                     return self._send(404, {'message': 'Not Found'})
                 rest = m.group(3) or ''
                 if rest == '' and method == 'GET':
-                    return self._send(200, {'private': False, 'permissions': {'push': self._authed(), 'pull': True}})
+                    return self._send(200, {'private': fake.private, 'default_branch': fake.default_branch, 'permissions': {'push': self._authed(), 'pull': True}})
+                if rest == '/branches' and method == 'GET':
+                    return self._send(200, [{'name': k, 'commit': {'sha': v}} for k, v in fake.refs.items()])
+                empty = not fake.refs
+                if empty and rest.startswith('/git/'):
+                    return self._send(409, {'message': 'Git Repository is empty.'})
                 if rest.startswith('/git/matching-refs/heads/') and method == 'GET':
                     b = rest[len('/git/matching-refs/heads/'):]
                     return self._send(200, [{'ref': f'refs/heads/{k}', 'object': {'sha': v, 'type': 'commit'}} for k, v in fake.refs.items() if k.startswith(b)])
@@ -137,13 +157,29 @@ class FakeGitHub:
                     return self._send(200, {'tree': {'sha': c['tree']}, 'parents': [{'sha': p} for p in c['parents']], 'message': c['message']})
                 if rest.startswith('/contents/') and method == 'GET':
                     p = rest[len('/contents/'):]
-                    files = fake.files_at('tabit-data')
+                    if empty:
+                        return self._send(404, {'message': 'This repository is empty.'})
+                    files = fake.files_at(self.query.get('ref', 'main'))
                     if p not in files:
                         return self._send(404, {'message': 'Not Found'})
                     return self._send(200, {'content': base64.b64encode(files[p].encode()).decode(), 'encoding': 'base64'})
                 # writes need a key
-                if method in ('POST', 'PATCH') and not self._authed():
+                if method in ('POST', 'PATCH', 'PUT') and not self._authed():
                     return self._send(401, {'message': 'Requires authentication'})
+                if rest.startswith('/contents/') and method == 'PUT':
+                    p = rest[len('/contents/'):]
+                    body = self._body()
+                    b = body.get('branch') or fake.default_branch
+                    if not fake.refs:
+                        b = fake.default_branch
+                    head = fake.refs.get(b)
+                    tree = dict(fake.trees[fake.commits[head]['tree']]) if head else {}
+                    if p in tree and not body.get('sha'):
+                        return self._send(422, {'message': '"sha" wasn\'t supplied.'})
+                    tree[p] = fake.put_blob(base64.b64decode(body['content']))
+                    sha = fake.put_commit(fake.put_tree(tree), [head] if head else [], body.get('message', ''))
+                    fake.refs[b] = sha
+                    return self._send(201, {'content': {'path': p}, 'commit': {'sha': sha}})
                 if rest == '/git/trees' and method == 'POST':
                     body = self._body()
                     base = dict(fake.trees[body['base_tree']]) if body.get('base_tree') else {}
@@ -157,9 +193,7 @@ class FakeGitHub:
                     return self._send(201, {'sha': fake.put_tree(base)})
                 if rest == '/git/commits' and method == 'POST':
                     body = self._body()
-                    sha = fake._sha('commit', json.dumps(body, sort_keys=True).encode() + str(len(fake.commits)).encode())
-                    fake.commits[sha] = {'tree': body['tree'], 'parents': body.get('parents', []), 'message': body.get('message', '')}
-                    return self._send(201, {'sha': sha})
+                    return self._send(201, {'sha': fake.put_commit(body['tree'], body.get('parents', []), body.get('message', ''))})
                 if rest == '/git/refs' and method == 'POST':
                     body = self._body()
                     b = body['ref'].replace('refs/heads/', '')

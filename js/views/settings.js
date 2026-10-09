@@ -2,7 +2,7 @@
 
 import { h, icon, button, toast, toggle, seg, confirmSheet, relTime, fmtTime, fill } from '../ui.js';
 import { store, subscribe, signedIn, getAuth, syncNow, signOut, pendingCount, cfg, useMock } from '../store.js';
-import { setupWithKey, signInWithPassword, addPassword, removePassword, listPasswords, tokenUrl, passwordProblem, replaceKey } from '../account.js';
+import { setupWithKey, signInWithPassword, addPassword, removePassword, listPasswords, tokenUrl, repoUrl, passwordProblem, replaceKey } from '../account.js';
 import { prefs, applyTheme, autoFontSize } from '../prefs.js';
 import { exportLibrary, addSongs } from '../importer.js';
 import { oldGist, fetchOldGist } from '../migrate.js';
@@ -28,6 +28,13 @@ export function view(route, { go }) {
 
   // ---------- sync ----------
   let busyText = '';
+  // the password list, read once per visit to this page (and after a change):
+  // the page redraws on every sync step
+  let pwCache = null;
+  const passwordList = (fresh = false) => {
+    if (fresh || !pwCache) pwCache = listPasswords().catch(e => { pwCache = null; throw e; });
+    return pwCache;
+  };
   function drawSync() {
     fill(syncBox, signedIn() ? syncedCard() : signInCard());
   }
@@ -66,10 +73,10 @@ export function view(route, { go }) {
     const btn = button('Set up sync', null, { cls: 'btn', type: 'submit' });
     return h('details', { class: 'sub-panel', open: route.query.has('setup') },
       h('summary', {}, 'First time? Set up sync (once, on your main device)'),
-      h('p', { class: 'hint' }, `Sync keeps your library on GitHub, in the ${cfg.owner}/${cfg.repo} repository, encrypted. It needs one key from GitHub:`),
+      h('p', { class: 'hint' }, `Sync keeps your library on GitHub, encrypted, in a repository of its own (${cfg.owner}/${cfg.repo}), with a key that can only reach that repository. Signed in to GitHub:`),
       h('ol', { class: 'steps' },
-        h('li', {}, 'Signed in to GitHub, open ', h('a', { href: tokenUrl(), target: '_blank', rel: 'noopener' }, 'this pre-filled key page'), '.'),
-        h('li', {}, 'Under ', h('b', {}, 'Repository access'), ' choose ', h('b', {}, 'Only select repositories'), ` → ${cfg.repo}. Check that `, h('b', {}, 'Contents'), ' is ', h('b', {}, 'Read and write'), '.'),
+        h('li', {}, 'Make the repository: open ', h('a', { href: repoUrl(), target: '_blank', rel: 'noopener' }, 'this pre-filled page'), ` (name `, h('b', {}, cfg.repo), ', ', h('b', {}, 'Public'), ': everything in it is encrypted) and press ', h('b', {}, 'Create repository'), '.'),
+        h('li', {}, 'Make the key: open ', h('a', { href: tokenUrl(), target: '_blank', rel: 'noopener' }, 'this pre-filled key page'), '. Under ', h('b', {}, 'Repository access'), ' choose ', h('b', {}, 'Only select repositories'), ` → ${cfg.repo}, and check that `, h('b', {}, 'Contents'), ' is ', h('b', {}, 'Read and write'), '.'),
         h('li', {}, 'Press ', h('b', {}, 'Generate token'), ', copy it, paste it here.'),
         h('li', {}, 'Then add a password. Every other device signs in with just that password.')),
       h('form', { onSubmit: async e => {
@@ -95,13 +102,13 @@ export function view(route, { go }) {
     const status = s.state === 'saving' ? 'Syncing…' : s.state === 'pending' ? `${pendingCount()} change${pendingCount() === 1 ? '' : 's'} waiting to sync` : s.state === 'offline' ? s.message : s.state === 'error' ? s.message : s.at ? `Synced ${relTime(s.at)}` : 'Synced';
     const dot = s.state === 'error' ? 'err' : s.state === 'saving' || s.state === 'pending' ? 'busy' : s.state === 'offline' ? '' : 'ok';
     const passwords = h('div', { class: 'set-list', style: { marginTop: '8px' } }, h('div', { class: 'set-row' }, h('span', { class: 'spinner' }), h('span', { class: 'lbl' }, 'Loading passwords…')));
-    const loadPw = () => listPasswords().then(list => {
+    const loadPw = (fresh = false) => passwordList(fresh).then(list => {
       fill(passwords, ...(list.length ? list.map(p => h('div', { class: 'set-row' },
         icon('key'),
         h('span', { class: 'lbl' }, h('b', {}, p.label), h('small', {}, `Added ${p.added}${p.device ? ` on ${p.device}` : ''}`)),
         button('Remove', async () => {
           if (!(await confirmSheet('Remove this password?', 'Devices already signed in stay signed in. New devices can’t use it anymore.', { confirm: 'Remove', danger: true }))) return;
-          try { await removePassword(p.id); toast('Password removed'); loadPw(); } catch (e) { toast(e.message); }
+          try { await removePassword(p.id); toast('Password removed'); loadPw(true); } catch (e) { toast(e.message); }
         }, { cls: 'btn-small btn-ghost' }))) : [h('div', { class: 'set-row' }, h('span', { class: 'lbl' }, h('b', {}, 'No passwords yet'), h('small', {}, 'Add one so your other devices can sign in.')))]));
     }).catch(e => fill(passwords, h('div', { class: 'set-row' }, h('span', { class: 'lbl error' }, e.message))));
     loadPw();
@@ -118,7 +125,7 @@ export function view(route, { go }) {
         pwIn.value = labelIn.value = '';
         pwErr.textContent = '';
         toast('Password added. Use it to sign in on your other devices.');
-        loadPw();
+        loadPw(true);
       } catch (ex) { pwErr.textContent = ex.message; }
     } }, h('div', { class: 'field-row' }, field('New password', pwIn), field('Label', labelIn)), pwErr, button('Add password', null, { type: 'submit', cls: 'btn-small' }));
 
@@ -130,7 +137,7 @@ export function view(route, { go }) {
         button('Sync now', () => syncNow(), { cls: 'btn-small', iconName: 'sync' }),
         button('Sign out on this device', async () => {
           const n = pendingCount();
-          const ok = await confirmSheet('Sign out on this device?', n ? `${n} change${n === 1 ? ' hasn’t' : 's haven’t'} synced yet and will stay only on this device.` : 'Your songs stay on this device, but stop syncing. Other devices aren’t affected.', { confirm: 'Sign out', danger: n > 0 });
+          const ok = await confirmSheet('Sign out on this device?', `${n ? `${n} change${n === 1 ? ' hasn’t' : 's haven’t'} synced yet. ` : ''}Your songs stay on this device but stop syncing; when you sign in again, what you changed here in the meantime is added to your library. Other devices aren’t affected.`, { confirm: 'Sign out', danger: n > 0 });
           if (ok) { signOut({ keepSongs: true }); drawSync(); }
         }, { cls: 'btn-small btn-ghost' })),
       h('h3', { style: { margin: '18px 0 0', fontSize: '15px' } }, 'Passwords'),
@@ -141,23 +148,34 @@ export function view(route, { go }) {
   }
 
   function replaceKeyPanel() {
-    const key = h('input', { class: 'input', type: 'password', placeholder: 'New github_pat_…', 'aria-label': 'New GitHub key' });
-    const pws = h('input', { class: 'input', type: 'password', placeholder: 'Passwords to keep, separated by commas', 'aria-label': 'Passwords to keep' });
+    const key = h('input', { class: 'input', type: 'password', placeholder: 'New github_pat_…', 'aria-label': 'New GitHub key', autocomplete: 'off', spellcheck: 'false' });
     const err = h('p', { class: 'error', role: 'alert' });
+    // one box per password on the list (they're never stored, so they're typed again)
+    const boxes = h('div', {}, h('p', { class: 'hint' }, 'Loading your passwords…'));
+    let inputs = [];
+    passwordList().then(list => {
+      inputs = list.map(p => ({ id: p.id, input: h('input', { class: 'input', type: 'password', autocomplete: 'off', placeholder: 'Type it again to keep it', 'aria-label': `Password “${p.label}”` }) }));
+      if (!inputs.length) inputs = [{ id: null, input: h('input', { class: 'input', type: 'password', autocomplete: 'new-password', placeholder: 'A password for signing in', 'aria-label': 'Password' }) }];
+      fill(boxes, ...inputs.map((x, i) => field(list[i] ? `Password “${list[i].label}”` : 'A password for your devices', x.input)));
+    }).catch(e => fill(boxes, h('p', { class: 'error' }, e.message)));
     return h('details', { class: 'sub-panel' }, h('summary', {}, 'Replace the GitHub key'),
-      h('p', { class: 'hint' }, 'If the key expired or you deleted it on GitHub. Type the passwords you want to keep (they’re re-encrypted with the new key).'),
+      h('p', { class: 'hint' }, 'If the key expired or you deleted it on GitHub. Make a new one the same way (step 2 above), then type each password you want to keep: they’re locked again with the new key. Any left empty stop working.'),
       h('form', { onSubmit: async e => {
         e.preventDefault();
+        const typed = inputs.map(x => ({ id: x.id, password: x.input.value }));
+        for (const t of typed) {
+          const pr = t.password.trim() && passwordProblem(t.password);
+          if (pr) { err.textContent = pr; return; }
+        }
         err.textContent = 'Saving…';
         try {
-          const list = pws.value.split(',').map(x => x.trim()).filter(Boolean).map((password, i) => ({ password, label: `Password ${i + 1}` }));
-          for (const p of list) { const pr = passwordProblem(p.password); if (pr) throw new Error(pr); }
-          await replaceKey(key.value, list);
+          await replaceKey(key.value, typed);
+          pwCache = null;
           err.textContent = '';
           toast('Key replaced');
           drawSync();
         } catch (ex) { err.textContent = ex.message; }
-      } }, field('New GitHub key', key), field('Passwords', pws), err, button('Replace key', null, { type: 'submit', cls: 'btn-small' })));
+      } }, field('New GitHub key', key), boxes, err, button('Replace key', null, { type: 'submit', cls: 'btn-small' })));
   }
 
   // ---------- look ----------
@@ -230,7 +248,7 @@ export function view(route, { go }) {
     return group('About', [
       h('div', { class: 'set-row' }, icon('guitar'), h('span', { class: 'lbl' }, h('b', {}, 'Ultimate Guitar connection'), ug, h('small', {}, PROXY.replace('https://', ''))), check),
       h('div', { class: 'set-row' }, icon('info'), h('span', { class: 'lbl' }, h('b', {}, `TabIt ${VERSION}`), h('small', {}, 'Works offline once opened. Your songs never leave your devices and your own GitHub repository.'))),
-      clickRow('sync', 'Check for an update', '', () => navigator.serviceWorker?.getRegistration().then(r => (r ? r.update().then(() => toast('You have the latest version (or an update is on its way).')) : toast('Updates install by themselves.')))),
+      clickRow('sync', 'Check for an update', '', checkForUpdate),
     ]);
   }
 
@@ -248,4 +266,17 @@ function row(label, sub, control, stacked = false) {
 }
 function clickRow(ic, label, sub, onClick) {
   return h('div', { class: 'set-row click', role: 'button', tabindex: '0', onClick, onKeydown: e => e.key === 'Enter' && onClick() }, icon(ic), h('span', { class: 'lbl' }, h('b', {}, label), sub ? h('small', {}, sub) : null), icon('forward'));
+}
+
+// An update that's already downloaded goes in now (the app reloads); otherwise
+// look for one.
+async function checkForUpdate() {
+  const reg = await navigator.serviceWorker?.getRegistration().catch(() => null);
+  if (!reg) { toast('Updates install by themselves.'); return; }
+  if (reg.waiting) { reg.waiting.postMessage('skip-waiting'); return; }
+  toast('Checking…', { ms: 1500 });
+  try { await reg.update(); } catch { toast('Couldn’t check right now. Are you online?'); return; }
+  if (reg.waiting) reg.waiting.postMessage('skip-waiting');
+  else if (reg.installing) toast('Downloading an update. TabIt will offer it in a moment.');
+  else toast('You have the latest version.');
 }

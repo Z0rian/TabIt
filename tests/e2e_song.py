@@ -35,6 +35,24 @@ ALIGN = """async () => {
 
 NAMES = "() => [...document.querySelectorAll('.sheet .pair .cn:not(.ann)')].map(e => e.dataset.chord)"
 
+# Just enough of YouTube's IFrame API: ready after a moment, a 3:52 video.
+FAKE_YT = """() => {
+  window.YT = { Player: class {
+    constructor(el, opts) {
+      this.opts = opts; this.state = -1; this.t0 = 0; window.__fakePlayer = this;
+      const box = document.createElement('div'); box.className = 'fake-yt'; box.textContent = 'video'; el.replaceWith(box);
+      setTimeout(() => opts.events.onReady({ target: this }), 100);
+    }
+    getDuration() { return 232; }
+    getCurrentTime() { return this.state === 1 ? (performance.now() - this.t0) / 1000 : 0; }
+    getPlayerState() { return this.state; }
+    playVideo() { this.state = 1; this.t0 = performance.now(); this.opts.events.onStateChange({ data: 1 }); }
+    pauseVideo() { this.state = 2; this.opts.events.onStateChange({ data: 2 }); }
+    seekTo() {}
+    destroy() {}
+  } };
+}"""
+
 
 def check(cond, msg):
     if not cond:
@@ -70,6 +88,17 @@ def run(engine, device, base, rec):
         aligned(page, 'as written')
         first = page.evaluate(NAMES)
         check('Em7' in first and 'G' in first, 'chords as written (Em7, G, …)')
+
+        # the strumming pattern: shown, playable, and the author's other one to pick
+        row = page.locator('.strum .strum-row')
+        check(row.get_attribute('aria-label') == 'down (accent), rest, rest, up, down, up', 'the strumming pattern is shown')
+        page.get_by_role('button', name='Play the strumming pattern').click()
+        expect(page.locator('.stroke.on')).to_have_count(1, timeout=3000)
+        page.get_by_role('button', name='Stop the strumming pattern').click()
+        expect(page.locator('.stroke.on')).to_have_count(0)
+        check(True, 'Play strums it in time, and stops')
+        page.locator('.strum-pick').select_option('1')
+        check(row.get_attribute('aria-label') == 'down (accent), rest, down, up, down, up', 'the other pattern can be picked')
 
         # chord shapes
         page.locator('.sheet .pair .cn', has_text='Em7').first.click()
@@ -132,6 +161,24 @@ def run(engine, device, base, rec):
         expect(page.locator('.preview-banner')).to_have_count(0)
         lib = page.evaluate("async () => Object.values((await import('/js/store.js')).store.lib.songs).map(s => s.title)")
         check(len(lib) == 2, f'saved to the library ({lib})')
+
+        # the YouTube player (a stand-in for YouTube's own API) sets the song length
+        print(f'[{device}] YouTube length and follow-the-video')
+        page.evaluate(FAKE_YT)
+        page.evaluate("async () => (await import('/js/store.js')).dispatch({ t: 'set', id: 's-orange', set: { yt: 'Lw7Q19mtly0' } })")
+        page.goto(base + '/#/song/s-orange')
+        page.wait_for_selector('.sheet .pair')
+        before = page.locator('.deck-time').inner_text()
+        page.get_by_role('button', name='Play along on YouTube').click()
+        expect(page.locator('.yt')).to_be_visible()
+        expect(page.locator('.deck-time')).to_contain_text('3:52', timeout=10000)
+        song = page.evaluate("async () => (await import('/js/store.js')).store.lib.songs['s-orange']")
+        check(song.get('duration') == 232 and song.get('durationFrom') == 'yt', f"the video's length becomes the song's ({before.strip()} → 3:52)")
+        page.evaluate('window.__fakePlayer.playVideo()')
+        expect(page.locator('.deck .play')).to_have_attribute('aria-label', 'Pause autoscroll', timeout=5000)
+        check(True, 'pressing play in the video starts the autoscroll (follow the video)')
+        page.get_by_role('button', name='Close video').click()
+        check(page.locator('.yt').count() == 0, 'the player closes')
         if errors:
             raise AssertionError(errors)
         b.close()

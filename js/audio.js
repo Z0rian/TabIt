@@ -64,19 +64,25 @@ export function pluck(midi, { duration = 2.5, volume = 0.7 } = {}) {
   } catch { /* a failed note shouldn't break the page */ }
 }
 
-// Strums a voicing ({ frets }, -1 = muted): 'down' plays low string to high.
-export function strum(voicing, { tuning = STANDARD, direction = 'down', spread = 0.028, volume = 0.6 } = {}) {
+// The audio clock (seconds), for scheduling strokes ahead; 0 without Web Audio.
+export const audioTime = () => (context()?.currentTime ?? 0);
+export const hasAudio = () => !!context();
+
+// Strums a voicing ({ frets }, -1 = muted): 'down' plays low string to high,
+// 'up' the top four strings back down. `at` is a time on the audio clock;
+// `short` damps the strings straight away (a muted stroke).
+export function strum(voicing, { tuning = STANDARD, direction = 'down', spread = 0.028, volume = 0.6, at = 0, short = false } = {}) {
   const c = context();
   if (!c || !Array.isArray(voicing?.frets)) return;
   wake(c);
-  const notes = [];
+  let notes = [];
   voicing.frets.forEach((f, s) => { if (f >= 0 && Number.isFinite(tuning[s])) notes.push(tuning[s] + f); });
-  if (direction === 'up') notes.reverse();
+  if (direction === 'up') notes = notes.slice(-4).reverse();
   // later strings in a stroke are a touch softer, and an upstroke lighter overall
   const level = volume * (direction === 'up' ? 0.8 : 1);
   try {
-    const t0 = c.currentTime + 0.02;
-    notes.forEach((m, i) => play(c, m, t0 + i * Math.max(0, spread), 2.5, level * (1 - i * 0.04)));
+    const t0 = Math.max(c.currentTime + 0.02, at);
+    notes.forEach((m, i) => play(c, m, t0 + i * Math.max(0, spread), short ? 0.07 : 2.5, level * (1 - i * 0.04)));
   } catch { /* as above */ }
 }
 

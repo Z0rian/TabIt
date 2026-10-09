@@ -3,7 +3,7 @@
 import { h, icon, toast } from './ui.js';
 import * as store from './store.js';
 import { prefs, applyTheme } from './prefs.js';
-import { oldLibrary, markMigrated, oldTheme } from './migrate.js';
+import { oldLibrary, markMigrated, oldTheme, shrinkCovers } from './migrate.js';
 import { requestPersist } from './db.js';
 
 const VIEWS = {
@@ -102,6 +102,7 @@ async function boot() {
     }
   }
   markMigrated();
+  addEventListener('tabit-storage-error', () => toast('This device’s storage is full or not working, so your latest changes may not be kept after closing TabIt. Free up some space, or export a backup in Settings.', { ms: 12000 }));
   appEl.append(tabbar, viewEl);
   document.getElementById('root').replaceWith(appEl);
   addEventListener('hashchange', () => { track(); route(); });
@@ -110,14 +111,21 @@ async function boot() {
   setInterval(() => { if (document.visibilityState === 'visible') store.maybePull(5 * 60_000); }, 60_000);
   requestPersist();
   registerServiceWorker();
+  setTimeout(() => shrinkCovers(Object.values(store.store.lib.songs), op => store.dispatch(op, { lazy: true })), 3000);
 }
 
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
   if (store.isLocalDev && !new URLSearchParams(location.search).has('sw')) return;
+  const started = Date.now();
   navigator.serviceWorker.register('sw.js').then(reg => {
+    // An update that arrives while you're using the app waits for a tap; one
+    // that's ready as the app starts goes in straight away (nothing to lose yet).
+    let closeOffer = null;
     const offer = worker => {
-      toast('A new version of TabIt is ready.', { action: 'Update', ms: 15000, onAction: () => worker.postMessage('skip-waiting') });
+      if (Date.now() - started < 4000) { worker.postMessage('skip-waiting'); return; }
+      closeOffer?.();
+      closeOffer = toast('A new version of TabIt is ready.', { action: 'Update', ms: 15000, onAction: () => worker.postMessage('skip-waiting') });
     };
     if (reg.waiting && navigator.serviceWorker.controller) offer(reg.waiting);
     reg.addEventListener('updatefound', () => {
@@ -126,12 +134,18 @@ function registerServiceWorker() {
         if (w.state === 'installed' && navigator.serviceWorker.controller) offer(w);
       });
     });
-    // look for updates when the app comes back to the front
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+    // look for updates when the app comes back to the front, and offer again
+    // one that's waiting (its message may have been missed)
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') return;
+      reg.update().catch(() => {}).then(() => { if (reg.waiting && navigator.serviceWorker.controller) offer(reg.waiting); });
+    });
   }).catch(() => {});
+  // reload into a new version, but not the very first time a worker takes over
+  const hadController = !!navigator.serviceWorker.controller;
   let reloading = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (reloading) return;
+    if (reloading || !hadController) return;
     reloading = true;
     location.reload();
   });

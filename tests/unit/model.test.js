@@ -1,5 +1,5 @@
 import { test, eq, ok, deepEq } from '../harness.js';
-import { emptyLibrary, makeSong, applyOp, applyOps, invertOp, normalize, searchSongs, sortSongs, groupByArtist, findDuplicate, fold } from '../../js/model.js';
+import { emptyLibrary, makeSong, applyOp, applyOps, invertOp, normalize, searchSongs, sortSongs, groupByArtist, findDuplicate, fold, diffOps } from '../../js/model.js';
 
 const lib0 = () => {
   let lib = emptyLibrary();
@@ -85,4 +85,35 @@ test('duplicates by source url, or same title/artist/text', () => {
   eq(findDuplicate(lib, { title: 'whatever', src: { url: 'https://x/1' } })?.id, 's-4');
   eq(findDuplicate(lib, { title: 'Fast Lane', artist: 'The Example Band', content: 'x' })?.id, 's-1');
   eq(findDuplicate(lib, { title: 'Fast Lane', artist: 'The Example Band', content: 'different' }), null);
+});
+
+test('a change to a setlist that was deleted doesn’t bring it back', () => {
+  let lib = applyOp(lib0(), { t: 'list', id: 'l-1', set: { songs: ['s-1'] } });
+  ok(!lib.setlists['l-1'], 'adding a song to a missing setlist is ignored');
+  lib = applyOp(lib, { t: 'list', id: 'l-1', set: { name: 'Gig', songs: ['s-1'] } });
+  eq(lib.setlists['l-1'].name, 'Gig', 'making one (it has a name) works');
+});
+
+test('diffOps: what changed between two copies, field by field', () => {
+  const a = lib0();
+  a.songs['s-1'] = { ...a.songs['s-1'], view: { tr: 2, capo: 1 } };
+  a.setlists['l-1'] = { id: 'l-1', name: 'Gig', songs: ['s-1'] };
+  const b = applyOps(a, [
+    { t: 'set', id: 's-1', set: { notes: 'n' } },
+    { t: 'view', id: 's-1', set: { tr: null, simplify: true } },
+    { t: 'del', id: 's-2' },
+    { t: 'add', song: makeSong({ id: 's-9', title: 'Nine', content: 'z' }) },
+    { t: 'list', id: 'l-1', set: { songs: ['s-1', 's-9'] } },
+    { t: 'prefs', set: { theme: 'dark' } },
+  ]);
+  const ops = diffOps(a, b);
+  deepEq(applyOps(a, ops), b, 'the ops rebuild the second copy');
+  deepEq(diffOps(b, b), [], 'no changes, no ops');
+  // applied to a copy edited elsewhere, only the fields changed here move
+  const elsewhere = applyOp(a, { t: 'set', id: 's-1', set: { title: 'Edited elsewhere' } });
+  const merged = applyOps(elsewhere, ops);
+  eq(merged.songs['s-1'].title, 'Edited elsewhere');
+  eq(merged.songs['s-1'].notes, 'n');
+  deepEq(merged.songs['s-1'].view, { capo: 1, simplify: true });
+  deepEq(merged.setlists['l-1'].songs, ['s-1', 's-9']);
 });

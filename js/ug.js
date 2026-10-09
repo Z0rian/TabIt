@@ -10,6 +10,7 @@
 import { parseSong } from './parse.js';
 import { detectKey, isChord } from './theory.js';
 import { fold, makeSong } from './model.js';
+import { readStrumming } from './strum.js';
 
 export const PROXY = 'https://ug-proxy.zorian.workers.dev';
 
@@ -104,6 +105,7 @@ export function songFromTab(result, tab, extra = {}) {
     key, capo: capo || undefined, tuning: tuning && tuning !== 'E A D G B E' ? tuning : undefined, bpm: bpm || undefined,
     cover: result.cover || tab.song?.cover || undefined,
     shapes: shapes && Object.keys(shapes).length ? shapes : undefined,
+    strum: readStrumming(tab.strumming || tab.strummings),
     ...extra,
   });
 }

@@ -12,7 +12,8 @@ import { Player } from '../youtube.js';
 import { findVideo, videoIdFrom, searchUG, groupResults, fetchTab, songFromTab } from '../ug.js';
 import { prefs, fontSize } from '../prefs.js';
 import { session } from '../session.js';
-import { openChord, chosenShape, diagram } from './chordsheet.js';
+import { openChord, chosenShape, diagram, tuningMidi } from './chordsheet.js';
+import { strumCard } from './strum.js';
 import { TUNINGS } from '../voicings.js';
 import { savePreview, menuRow } from './library.js';
 
@@ -84,6 +85,27 @@ export function view(route, { go, back }) {
   const sheetHolder = h('div', { class: 'sheet-holder' });
   root.append(bar, headEl, strip, sheetHolder);
 
+  // the strumming pattern plays on the song's first chord, as it's shown now
+  let strumMemo = null;
+  const firstChord = () => {
+    const orig = doc.chords[0];
+    if (!orig) return null;
+    const name = chordName(orig);
+    const key = `${name}|${tuningKey()}|${vs().voicings?.[name] || ''}|${shift()}|${vs().simplify ? 1 : 0}`;
+    if (strumMemo?.key !== key) strumMemo = { key, v: chosenShape(name, { author: authorShapes(orig), tuning: tuningKey(), pick: vs().voicings?.[name] })?.v || null };
+    return strumMemo.v;
+  };
+  let strumEl = null;
+  let strumOf;
+  const strumBox = () => {
+    if (strumOf !== song.strum) {
+      strumEl?.destroy();
+      strumOf = song.strum;
+      strumEl = song.strum?.length ? strumCard(song.strum, { chord: firstChord, tuning: () => tuningMidi(tuningKey()).map(m => m + capoNow()) }) : null;
+    }
+    return strumEl;
+  };
+
   let sheet = null;
   let stopWatch = null;
   let scroller = null;
@@ -107,7 +129,8 @@ export function view(route, { go, back }) {
       h('p', { class: 'by' }, song.artist ? h('a', { href: `#/?q=${encodeURIComponent(song.artist)}`, onClick: e => { e.preventDefault(); session.query = song.artist; go('#/'); } }, song.artist) : ''),
       h('div', { class: 'song-meta' }, chips),
       isPreview ? h('div', { class: 'preview-banner' }, icon('cloud'), h('span', {}, 'From Ultimate Guitar. Save it to keep it offline and in sync.'), button('Save', () => saveIt(false), { cls: 'btn-primary btn-small' })) : null,
-      song.notes ? h('p', { class: 'hint', style: { whiteSpace: 'pre-wrap', margin: '10px 0 0' } }, song.notes) : null);
+      song.notes ? h('p', { class: 'hint', style: { whiteSpace: 'pre-wrap', margin: '10px 0 0' } }, song.notes) : null,
+      vs().hide ? null : strumBox());
     ttl.textContent = song.title;
     fill(fav, icon(song.fav ? 'heartFill' : 'heart'));
     fav.classList.toggle('on', !!song.fav);
@@ -121,7 +144,7 @@ export function view(route, { go, back }) {
       const orig = doc.chords.find(c => chordName(c) === name);
       const shape = chosenShape(name, { author: authorShapes(orig), tuning: tuningKey(), pick: vs().voicings?.[name] });
       return h('button', { type: 'button', class: 'chord-card', role: 'listitem', 'aria-label': `${name} chord shapes`, onClick: () => chordTapped(name, orig) },
-        h('b', {}, name), shape ? diagram(shape.v, name, { size: 58, mini: true }) : h('span', { class: 'hint' }, '?'));
+        h('b', {}, name), shape ? diagram(shape.v, name, { size: innerWidth >= 1100 ? 72 : 58, mini: true }) : h('span', { class: 'hint' }, '?'));
     }));
   }
 
@@ -451,8 +474,8 @@ export function view(route, { go, back }) {
             d.close();
             if (isPreview) { session.preview = fresh; go('#/song/preview'); return; }
             if (await confirmSheet('Switch to this version?', `Replaces the chords and lyrics of “${song.title}” with version ${v.version}. Your favorite, notes and setlists stay.`, { confirm: 'Switch' })) {
-              const { title, artist, content, src, key, capo, tuning, bpm, shapes, kind } = fresh;
-              const undo = undoable({ t: 'set', id, set: { title, artist, content, src, key: key || null, capo: capo || null, tuning: tuning || null, bpm: bpm || null, shapes: shapes || null, kind, edited: new Date().toISOString() } });
+              const { title, artist, content, src, key, capo, tuning, bpm, shapes, strum, kind } = fresh;
+              const undo = undoable({ t: 'set', id, set: { title, artist, content, src, key: key || null, capo: capo || null, tuning: tuning || null, bpm: bpm || null, shapes: shapes || null, strum: strum || null, kind, edited: new Date().toISOString() } });
               toast(`Now showing version ${v.version}`, { action: 'Undo', onAction: undo });
             }
           } catch (e) { d.set(h('p', { class: 'error' }, e.message)); }
@@ -533,7 +556,7 @@ export function view(route, { go, back }) {
     if (!next) { if (!isPreview) go('#/'); return; }
     if (next === song) return;
     const contentChanged = next.content !== song.content;
-    const shown = s => JSON.stringify([s.view || {}, s.fav, s.title, s.artist, s.key, s.capo, s.tuning, s.notes, s.duration, s.yt, s.shapes || null, s.src?.version]);
+    const shown = s => JSON.stringify([s.view || {}, s.fav, s.title, s.artist, s.key, s.capo, s.tuning, s.bpm, s.notes, s.duration, s.yt, s.shapes || null, s.strum || null, s.src?.version]);
     const same = !contentChanged && shown(next) === shown(song);
     song = next;
     if (same) { deck.update(); return; } // only a play count or the like
@@ -560,6 +583,7 @@ export function view(route, { go, back }) {
     },
     destroy() {
       unsub();
+      strumEl?.destroy();
       stopWatch?.();
       scroller?.destroy();
       closeVideo();

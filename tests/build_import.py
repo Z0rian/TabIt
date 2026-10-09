@@ -22,7 +22,7 @@ BUILD = """async () => {
   for (const k of Object.keys(index)) {
     const rec = await (await fetch('/tests/corpus/songs/' + k + '.json')).json();
     if (!rec.content) continue;
-    const result = rec.fallback || rec.match;
+    const result = { ...(rec.fallback || rec.match), cover: rec.cover || '' };
     if (!result || seen.has(result.url)) continue;
     seen.add(result.url);
     const meta = rec.meta || {};

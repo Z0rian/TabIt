@@ -2,6 +2,10 @@
 // localStorage, which is small (about 5 MB) and shared with the other apps on
 // z0rian.github.io. Falls back to memory when IndexedDB isn't available
 // (some private browsing modes), so the app still runs for the session.
+//
+// Reads and writes that fail are retried once on a fresh connection (Safari
+// sometimes loses its connection to the storage process), then reject: a
+// caller must know when something it relies on wasn't saved, or wasn't read.
 
 const NAME = 'tabit';
 const STORE = 'kv';
@@ -24,6 +28,7 @@ function open() {
     req.onsuccess = () => {
       const db = req.result;
       db.onversionchange = () => { db.close(); dbp = null; };
+      db.onclose = () => { dbp = null; };
       resolve(db);
     };
     req.onerror = () => { useMemory = true; resolve(null); };
@@ -44,27 +49,38 @@ function tx(db, mode, fn) {
   });
 }
 
-export async function get(key) {
-  const db = await open();
-  if (!db) return memory.get(key);
-  try { return await tx(db, 'readonly', s => s.get(key)); } catch { return memory.get(key); }
-}
-
-export async function set(key, value) {
-  const db = await open();
-  memory.set(key, value);
-  if (!db) return;
-  try { await tx(db, 'readwrite', s => s.put(value, key)); } catch (e) {
-    // quota or a broken database: keep the session working from memory
-    console.warn('TabIt storage:', e);
+// { memory: true } when there's no IndexedDB, else { value }.
+async function run(mode, fn) {
+  for (let attempt = 0; ; attempt++) {
+    const db = await open();
+    if (!db) return { memory: true };
+    try {
+      return { value: await tx(db, mode, fn) };
+    } catch (e) {
+      if (dbp) dbp = null;
+      try { db.close(); } catch { /* already closed */ }
+      if (attempt) throw e;
+    }
   }
 }
 
+export async function get(key) {
+  const r = await run('readonly', s => s.get(key));
+  return r.memory ? memory.get(key) : r.value;
+}
+
+// tests: pretend the disk is full
+export const faults = { writes: false };
+
+export async function set(key, value) {
+  memory.set(key, value);
+  if (faults.writes) throw new DOMException('Storage is full (test)', 'QuotaExceededError');
+  await run('readwrite', s => s.put(value, key));
+}
+
 export async function del(key) {
-  const db = await open();
   memory.delete(key);
-  if (!db) return;
-  try { await tx(db, 'readwrite', s => s.delete(key)); } catch { /* ignore */ }
+  await run('readwrite', s => s.delete(key));
 }
 
 export const persistent = async () => {

@@ -243,6 +243,8 @@ export function renderSheet(doc, { chordName, mono = false, hideChords = false }
 // settles in a few rounds.
 export function fitChords(root) {
   for (const u of root.querySelectorAll('.c.fit')) { u.style.minWidth = ''; u.classList.remove('fit'); }
+  for (const x of root.querySelectorAll('.brk, .hy')) x.remove();
+  for (const w of root.querySelectorAll('.w.split')) w.classList.remove('split');
   const lines = [...root.querySelectorAll('.pair')];
   if (!lines.length) return 0;
   const unitPx = parseFloat(getComputedStyle(lines[0]).fontSize) || 16;
@@ -251,20 +253,35 @@ export function fitChords(root) {
   for (let round = 0; round < 6; round++) {
     const right = root.getBoundingClientRect().right;
     const fix = new Map();
+    let split = 0;
     for (const line of lines) {
+      const left = line.getBoundingClientRect().left;
       const units = line.querySelectorAll('.c');
       let prev = null;
       for (const unit of units) {
         const r = unit.firstChild.getBoundingClientRect();
         const ur = unit.getBoundingClientRect();
-        if (r.right > right + 0.5) fix.set(unit, Math.max(fix.get(unit) || 0, r.width));
+        if (r.right > right + 0.5) {
+          // A chord partway into a word that's too long for the line even at its
+          // start (big text on a small phone): the word breaks before it.
+          const w = unit.parentNode;
+          if (w.classList.contains('w') && !w.classList.contains('split') && unit.previousSibling &&
+              left + (r.left - w.getBoundingClientRect().left) + r.width > right + 0.5) {
+            const p = unit.previousSibling;
+            const before = p.nodeType === 3 ? p.data : p.querySelector?.('.ct')?.textContent || '';
+            if (/\p{L}$/u.test(before) && /^\p{L}/u.test(unit.lastChild.textContent)) unit.before(el('span', 'hy', '-'));
+            unit.before(el('br', 'brk'));
+            w.classList.add('split');
+            split++;
+          } else fix.set(unit, Math.max(fix.get(unit) || 0, r.width));
+        }
         if (prev && Math.abs(prev.ur.top - ur.top) < 2 && r.left < prev.r.right + gap) {
           fix.set(prev.unit, Math.max(fix.get(prev.unit) || 0, prev.r.width + gap));
         }
         prev = { unit, r, ur };
       }
     }
-    if (!fix.size) break;
+    if (!fix.size && !split) break;
     for (const [u, w] of fix) {
       const em = Math.ceil((w / unitPx) * 1000) / 1000;
       const cur = parseFloat(u.style.minWidth) || 0;

@@ -15,8 +15,8 @@ history before commit `e972b56`).
   - `pitch.js`: YIN pitch detection + `PitchTracker` (one-pole low-pass on the pitch, tau 0.25 s; a new note must hold 70 ms; note-name hysteresis).
   - `autoscroll.js`: time-based autoscroll over line weights (`data-w` on sheet blocks), reading line at 36% of the screen, hand-scroll takeover. `youtube.js`: IFrame API player (duration, follow-video).
   - `model.js`: the library and its ops (`add`, `set`, `view`, `del`, `list`, `list-del`, `prefs`, `many`), `applyOp`, `invertOp` (undo). Ops set values, never toggle, so they replay safely.
-  - `store.js`: base (last synced) + pending ops; IndexedDB persistence (`db.js`); the sync engine (pull changed files, replay the pending batch, one commit, retry on non-fast-forward). Signed out = ops go straight into base.
-  - `remote.js`: GitHub Git Data API on branch `tabit-data` (+ `MockRemote` for `?mock`; `localStorage['tabit.dev.api']` points at a fake GitHub on localhost only).
+  - `store.js`: base (last synced) + pending ops; IndexedDB persistence (`db.js`: base and its commit are one record, `lib.state`; writes reject on failure and the signed-out journal is only trimmed after a real save); the sync engine (pull changed files, replay the pending batch, one commit, retry on non-fast-forward). A `session` counter stops a sync from an older sign-in touching state. Signed out = ops go straight into base; signing out saves the synced copy (`lib.since`) so signing back in can apply this device's changes field by field (`diffOps`) without bringing back songs deleted elsewhere. Tabs share ops over a `BroadcastChannel`.
+  - `remote.js`: GitHub Git Data API on `main` of a separate public repository, `<owner>/tabit-data` (so the key the passwords unlock can't touch the app's repository). First commit in an empty repository goes through the Contents API. Plus `MockRemote` for `?mock`; `localStorage['tabit.dev.api']` points at a fake GitHub (`tests/fakegithub.py`) on localhost only.
   - `account.js`: owner setup with a fine-grained key, passwords in `access.json` (each seals `{token, libKey}` with PBKDF2-600k → AES-GCM), sign in, replace key. `crypto.js`: the primitives; library files are gzip → AES-GCM with the path as associated data.
   - `ug.js`: the Cloudflare Worker client (search, tab, YouTube), version numbering, the Tabs & Chords list parser and matcher. `importer.js`: background import queue, backup files. `migrate.js`: the old app's localStorage songs, once.
   - `views/*.js`: one file per screen; `ui.js`: `h()`, `fill()`, icons, drawers, toasts, swipe-to-delete.
@@ -36,7 +36,7 @@ history before commit `e972b56`).
 
 ## Testing
 
-`python tests/run_unit.py` (≈115 tests, both engines) and the e2e scripts listed in README.md. After touching the parser or the sheet, run `tests/e2e_align.py` (quick) and `--full` (≈17 min, ~1.7 M chord placements) before deploying.
+`python tests/run_unit.py` (≈120 tests, both engines) and the e2e scripts listed in README.md. After touching the parser or the sheet, run `tests/e2e_align.py` (quick) and `--full` (≈17 min, ~1.7 M chord placements) before deploying.
 
 ## Deploy
 

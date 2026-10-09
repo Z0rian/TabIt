@@ -71,3 +71,24 @@ export async function fetchOldGist({ gistId, token }) {
   if (!Array.isArray(arr)) throw new Error('The old backup isn’t a song list.');
   return convert(arr);
 }
+
+// The old app kept covers you added as full-size pictures inside the song,
+// which would make every sync upload them again. Small copies look the same in
+// the library.
+export async function shrinkCovers(songs, dispatch) {
+  for (const s of songs) {
+    if (typeof s.cover !== 'string' || !s.cover.startsWith('data:image') || s.cover.length < 24_000) continue;
+    try {
+      const img = new Image();
+      img.src = s.cover;
+      await img.decode();
+      const scale = Math.min(1, 192 / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(img.naturalWidth * scale));
+      c.height = Math.max(1, Math.round(img.naturalHeight * scale));
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      const small = c.toDataURL('image/jpeg', 0.82);
+      if (small.length < s.cover.length) dispatch({ t: 'set', id: s.id, set: { cover: small } });
+    } catch { /* not a picture the browser can read: leave it */ }
+  }
+}

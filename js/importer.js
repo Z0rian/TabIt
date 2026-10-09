@@ -96,19 +96,30 @@ async function worker() {
   }
 }
 
+// Tabs being fetched right now, so the two workers never bring in the same
+// song twice (a list can name it twice, e.g. once as a Guitar Pro favorite).
+const inflight = new Map();
+
 async function importOne(e) {
-  const songs = Object.values(store.lib.songs);
   const { result, how } = await findEntry(e);
   if (!result) { e.status = 'notfound'; e.note = 'Not found on Ultimate Guitar'; return; }
-  const existing = songs.find(s => s.src?.url === result.url);
-  if (existing) {
+  if (inflight.has(result.url)) await inflight.get(result.url).catch(() => {});
+  const skipIfThere = () => {
+    const existing = Object.values(store.lib.songs).find(s => s.src?.url === result.url);
+    if (!existing) return false;
     if (job.favorite && !existing.fav) dispatch({ t: 'set', id: existing.id, set: { fav: true } });
     e.status = 'skipped';
     e.note = 'Already in your library';
     e.id = existing.id;
-    return;
-  }
-  const tab = await fetchTab(result.url);
+    return true;
+  };
+  if (skipIfThere()) return;
+  const loading = fetchTab(result.url);
+  inflight.set(result.url, loading);
+  let tab;
+  try { tab = await loading; } finally { inflight.delete(result.url); }
+  if (skipIfThere()) return; // (the library may have changed while it loaded)
+  const songs = Object.values(store.lib.songs);
   const song = songFromTab(result, tab, { fav: job.favorite || undefined, added: e.date || new Date().toISOString() });
   // the old TabIt's copy of the same song gives way to the real tab
   const legacy = songs.find(s => s.src?.site === 'legacy' && fold(s.title) === fold(song.title) && fold(s.artist) === fold(song.artist));
@@ -127,30 +138,47 @@ async function importOne(e) {
 
 // ---------- files ----------
 
-// A TabIt backup ({ app: 'tabit', songs: [...] }) or the old app's export (an array).
-export function songsFromFile(text) {
+// A TabIt backup ({ app: 'tabit', songs: [...], setlists: [...] }) or the old
+// app's export (an array) → { songs, setlists }.
+export function readBackup(text) {
   const data = JSON.parse(text);
-  if (Array.isArray(data)) return Object.values(convert(data)?.songs || {});
+  if (Array.isArray(data)) return { songs: Object.values(convert(data)?.songs || {}), setlists: [] };
   if (data && data.app === 'tabit' && Array.isArray(data.songs)) {
-    return data.songs.filter(s => s && s.content).map(s => makeSong({ ...s, id: s.id }));
+    const lib = normalize({ setlists: Object.fromEntries((Array.isArray(data.setlists) ? data.setlists : []).filter(l => l?.id).map(l => [l.id, l])) });
+    return { songs: data.songs.filter(s => s && s.content).map(s => makeSong({ ...s, id: s.id })), setlists: Object.values(lib.setlists) };
   }
-  if (data && data.songs && typeof data.songs === 'object') return Object.values(normalize(data).songs);
+  if (data && data.songs && typeof data.songs === 'object') {
+    const lib = normalize(data);
+    return { songs: Object.values(lib.songs), setlists: Object.values(lib.setlists) };
+  }
   throw new Error('That file isn’t a TabIt backup.');
 }
 
-export function addSongs(songs) {
+// Adds the songs (and setlists) that aren't in the library yet. A song that's
+// already here under another id keeps its place in the setlists it came with.
+export function addSongs(songs, setlists = []) {
   let added = 0, skipped = 0;
   const lib = store.lib;
-  const urls = new Set(Object.values(lib.songs).map(s => s.src?.url).filter(Boolean));
+  const byUrl = new Map(Object.values(lib.songs).filter(s => s.src?.url).map(s => [s.src.url, s.id]));
+  const idFor = new Map();
   const ops = [];
   for (const s of songs) {
-    if (lib.songs[s.id] || (s.src?.url && urls.has(s.src.url))) { skipped++; continue; }
-    if (s.src?.url) urls.add(s.src.url);
+    const have = lib.songs[s.id] ? s.id : s.src?.url && byUrl.get(s.src.url);
+    if (have) { idFor.set(s.id, have); skipped++; continue; }
+    if (s.src?.url) byUrl.set(s.src.url, s.id);
+    idFor.set(s.id, s.id);
     ops.push({ t: 'add', song: s });
     added++;
   }
+  let lists = 0;
+  for (const l of setlists) {
+    if (lib.setlists[l.id]) continue;
+    const ids = l.songs.map(x => idFor.get(x) || (lib.songs[x] ? x : null)).filter(Boolean);
+    ops.push({ t: 'list', id: l.id, set: { ...l, name: l.name || 'Setlist', songs: ids } });
+    lists++;
+  }
   if (ops.length) dispatch({ t: 'many', ops });
-  return { added, skipped };
+  return { added, skipped, lists };
 }
 
 export function exportLibrary() {

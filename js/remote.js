@@ -1,10 +1,11 @@
 // Reading and writing the synced library on GitHub.
 //
-// The library lives on its own branch ("tabit-data") of the app's repository,
-// so saving never rebuilds the website. Every save is one commit made with the
-// Git Data API (all changed files at once), and the branch only moves forward:
-// if another device saved first, the update is refused and sync.js rebuilds
-// its changes on top of the newer copy.
+// The library lives in a repository of its own, <owner>/tabit-data (public,
+// everything in it encrypted), not in the app's: the key that saves it, which
+// every password unlocks, can't change the website. Every save is one commit
+// made with the Git Data API (all changed files at once), and the branch only
+// moves forward: if another device saved first, the update is refused and
+// store.js rebuilds its changes on top of the newer copy.
 
 export class RemoteError extends Error {
   constructor(message, status = 0, kind = 'server') {
@@ -14,20 +15,23 @@ export class RemoteError extends Error {
   }
 }
 
-const DEFAULTS = { owner: 'Z0rian', repo: 'TabIt', branch: 'tabit-data' };
+export const DATA_REPO = 'tabit-data';
+const DEFAULTS = { owner: 'Z0rian', repo: DATA_REPO, branch: 'main' };
 
-// On <owner>.github.io/<repo>/ the repository is the one serving the app.
+// On <owner>.github.io the data repository is that account's.
 export function repoConfig(loc = location) {
   const cfg = { ...DEFAULTS };
   const m = loc.hostname.match(/^([a-z0-9-]+)\.github\.io$/i);
-  if (m) {
-    cfg.owner = m[1];
-    const first = loc.pathname.split('/').filter(Boolean)[0];
-    if (first && !first.includes('.')) cfg.repo = first;
-  }
+  if (m && m[1].toLowerCase() !== DEFAULTS.owner.toLowerCase()) cfg.owner = m[1];
   return cfg;
 }
 
+const textToB64 = text => {
+  const bytes = new TextEncoder().encode(text);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+};
 const b64ToText = b64 => {
   const bin = atob(b64.replace(/\s/g, ''));
   const bytes = new Uint8Array(bin.length);
@@ -67,14 +71,16 @@ export class GitHubRemote {
     try { msg = (await res.json()).message || ''; } catch { /* not JSON */ }
     const s = res.status;
     if (s === 401) throw new RemoteError('GitHub didn’t accept the sync key (it may have expired or been deleted).', s, 'auth');
-    if (s === 403 && res.headers.get('x-ratelimit-remaining') === '0') throw new RemoteError('GitHub’s rate limit was reached. Sync will try again in a few minutes.', s, 'rate');
+    if ((s === 403 || s === 429) && (res.headers.get('x-ratelimit-remaining') === '0' || res.headers.get('retry-after') || /rate limit/i.test(msg))) {
+      throw new RemoteError('GitHub asked TabIt to slow down. Sync will try again in a few minutes.', s, 'rate');
+    }
     if (s === 403) throw new RemoteError('This key isn’t allowed to save here. It needs Contents: Read and write on the repository.', s, 'forbidden');
     if (s === 404) throw new RemoteError(msg || 'Not found', s, 'notfound');
     if (s === 409 || s === 422) throw new RemoteError(msg || 'Someone else saved at the same moment.', s, 'conflict');
     throw new RemoteError(msg || `GitHub error ${s}`, s, 'server');
   }
 
-  // Latest commit on the data branch, or null when it doesn't exist yet.
+  // Latest commit on the data branch, or null when there isn't one yet.
   // (matching-refs answers [] instead of a 404 for a branch that isn't there)
   async head() {
     try {
@@ -83,6 +89,17 @@ export class GitHubRemote {
       return ref ? ref.object.sha : null;
     } catch (e) {
       if (e.kind === 'notfound' || (e.kind === 'conflict' && /empty/i.test(e.message))) return null;
+      throw e;
+    }
+  }
+
+  // A repository with no commits at all (just made, without a README). Most
+  // git calls answer an error for one; listing its branches doesn't.
+  async isEmpty() {
+    try {
+      return !(await this.request(`${this.base}/branches?per_page=1`)).length;
+    } catch (e) {
+      if (e.kind === 'conflict' && /empty/i.test(e.message)) return true;
       throw e;
     }
   }
@@ -103,6 +120,19 @@ export class GitHubRemote {
   // One commit with every change. files: { path: text | null (delete) }.
   // Moves the branch only if it still points at `parent`.
   async commit({ parent, files, message }) {
+    if (parent || !(await this.isEmpty())) return this.gitCommit({ parent, files, message });
+    // A brand-new empty repository: the Git Data API only works once there's
+    // a commit, so the first file is written the ordinary way.
+    const [[path, text], ...rest] = Object.entries(files).filter(([, t]) => t !== null);
+    const put = branch => this.request(`${this.base}/contents/${path}`, { method: 'PUT', body: { message, content: textToB64(text), ...(branch ? { branch } : {}) } });
+    const j = await put(this.cfg.branch).catch(e => (e.kind === 'notfound' ? put(null) : Promise.reject(e)));
+    const sha = j.commit.sha;
+    // (if it went to a default branch with another name, make ours point at it)
+    if (!(await this.head())) await this.request(`${this.base}/git/refs`, { method: 'POST', body: { ref: `refs/heads/${this.cfg.branch}`, sha } });
+    return rest.length ? this.gitCommit({ parent: sha, files: Object.fromEntries(rest), message }) : sha;
+  }
+
+  async gitCommit({ parent, files, message }) {
     const tree = Object.entries(files).map(([path, text]) => (text === null
       ? { path, mode: '100644', type: 'blob', sha: null }
       : { path, mode: '100644', type: 'blob', content: text }));
@@ -119,9 +149,14 @@ export class GitHubRemote {
 
   // The passwords file is public (each entry only opens with its password), so
   // a device that isn't signed in yet can read it without a key.
+  // (Signed in, it's read with the key: anonymous reads are limited to 60 an hour.)
   async readPublic(path) {
+    const url = `${this.base}/contents/${path}?ref=${encodeURIComponent(this.cfg.branch)}`;
     try {
-      const j = await this.request(`${this.base}/contents/${path}?ref=${encodeURIComponent(this.cfg.branch)}`, { auth: false });
+      const j = await this.request(url, { auth: true }).catch(e => {
+        if (e.kind === 'auth' && this.token) return this.request(url, { auth: false });
+        throw e;
+      });
       return b64ToText(j.content);
     } catch (e) {
       if (e.kind === 'notfound') return null;
@@ -173,6 +208,7 @@ export class MockRemote {
   }
 
   async head() { await this.wait(); return MockRemote.state().head; }
+  async isEmpty() { await this.wait(); return !MockRemote.state().head; }
 
   async files(commit) {
     await this.wait();

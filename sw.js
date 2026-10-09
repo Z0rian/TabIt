@@ -7,7 +7,7 @@
 // The list below is written by scripts/build.py. Run it before committing.
 
 // BUILD-START
-const BUILD = 'd9f52560db';
+const BUILD = '3139b194ff';
 const PRECACHE = [
   './',
   'index.html',
@@ -30,6 +30,7 @@ const PRECACHE = [
   'js/session.js',
   'js/sheet.js',
   'js/store.js',
+  'js/strum.js',
   'js/theory.js',
   'js/ug.js',
   'js/ui.js',
@@ -44,6 +45,7 @@ const PRECACHE = [
   'js/views/library.js',
   'js/views/settings.js',
   'js/views/song.js',
+  'js/views/strum.js',
   'js/views/tuner.js',
   'fonts/bricolage-grotesque.woff2',
   'fonts/jetbrains-mono.woff2',
@@ -59,9 +61,14 @@ const IMAGES = 'tabit-images';
 
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
+    const before = await caches.keys();
     const cache = await caches.open(CACHE);
     // straight from the network, not the browser's HTTP cache
     await cache.addAll(PRECACHE.map(p => new Request(p, { cache: 'reload' })));
+    // First install, or taking over from the old TabIt (whose worker would
+    // otherwise keep serving the old app): start right away. Later updates
+    // wait for the app to say when (see app.js).
+    if (!before.some(k => k.startsWith('tabit-app-'))) await self.skipWaiting();
   })());
 });
 
@@ -102,13 +109,15 @@ self.addEventListener('fetch', event => {
   // everything else (Ultimate Guitar, GitHub, YouTube) goes straight to the network
 });
 
+// Covers are fetched with CORS (both hosts allow it): an opaque copy would
+// count as several megabytes against the storage quota this site shares.
 async function staleWhileRevalidate(req) {
   const cache = await caches.open(IMAGES);
-  const hit = await cache.match(req);
-  const fresh = fetch(req).then(res => {
-    if (res && (res.ok || res.type === 'opaque')) cache.put(req, res.clone()).then(() => trim(cache));
+  const hit = await cache.match(req.url);
+  const fresh = fetch(req.url, { mode: 'cors', credentials: 'omit' }).then(res => {
+    if (res.ok) cache.put(req.url, res.clone()).then(() => trim(cache));
     return res;
-  }).catch(() => hit);
+  }).catch(() => hit || fetch(req));
   return hit || fresh;
 }
 

@@ -3,13 +3,13 @@
 // (base + pending). Edits show instantly and save in the background; offline
 // they wait and retry. Without sync set up, edits go straight into the base.
 //
-// On GitHub (branch tabit-data, see remote.js) the library is split into an
+// On GitHub (the tabit-data repository, see remote.js) the library is split into an
 // index (titles, favorites, settings: small, changes often) and 16 shards of
 // song text (big, changes rarely), each encrypted. A save only rewrites the
 // files whose contents changed.
 
 import * as db from './db.js';
-import { applyOp, applyOps, emptyLibrary, normalize, invertOp } from './model.js';
+import { applyOp, applyOps, emptyLibrary, normalize, invertOp, diffOps } from './model.js';
 import { GitHubRemote, MockRemote, RemoteError, repoConfig } from './remote.js';
 import { encryptJSON, decryptJSON } from './crypto.js';
 
@@ -64,16 +64,19 @@ export function _useRemote(factory) { makeRemote = factory; }
 //
 // Signed out, the library itself is the only copy, and Safari doesn't finish a
 // write that starts as the page goes away. So each edit also goes into a small
-// journal, written at once, that start-up replays (ops are safe to replay).
+// journal, written at once, that start-up replays (ops are safe to replay). The
+// journal is only trimmed once the library holding its edits is really saved.
 let persistTimer = null;
 let baseDirty = false;
 let journal = [];
+let journalGen = 0;
+let storageFailed = false;
 
 // Small queues also go to localStorage, which is written synchronously and so
 // survives the app being closed the instant after a tap; big ones (an import
 // of hundreds of songs) only to IndexedDB.
 function saveQueue(name, ops) {
-  db.set(`lib.${name}`, ops);
+  db.set(`lib.${name}`, ops).catch(storageError);
   try {
     const text = JSON.stringify(ops);
     if (text.length < 250_000) localStorage.setItem(`tabit.${name}`, text);
@@ -89,19 +92,36 @@ function readQueue(name, fromDb) {
   } catch { /* fall back */ }
   return Array.isArray(fromDb) ? fromDb : [];
 }
+// The library and the commit it matches are one record, so a half-finished
+// save can never pair a library with the wrong commit.
 function writeBase() {
   clearTimeout(persistTimer);
-  if (!baseDirty) return;
+  if (!baseDirty) return Promise.resolve();
   baseDirty = false;
   const n = journal.length;
-  Promise.all([db.set('lib.base', state.base), db.set('lib.rev', state.rev)]).then(() => {
-    if (!n) return;
+  const gen = journalGen;
+  return db.set('lib.state', { base: state.base, rev: signedIn() ? state.rev : null }).then(() => {
+    storageFailed = false;
+    if (!n || gen !== journalGen) return;
     journal = journal.slice(n);
     saveQueue('journal', journal);
+  }, e => {
+    // not saved (storage full?): keep the journal, try again in a while
+    baseDirty = true;
+    clearTimeout(persistTimer);
+    persistTimer = setTimeout(writeBase, 5000);
+    storageError(e);
   });
+}
+function storageError(e) {
+  if (storageFailed) return;
+  storageFailed = true;
+  console.warn('TabIt storage:', e);
+  dispatchEvent(new CustomEvent('tabit-storage-error', { detail: e }));
 }
 function clearJournal() {
   journal = [];
+  journalGen++;
   saveQueue('journal', journal);
 }
 function persist({ base = false } = {}) {
@@ -119,11 +139,18 @@ function recompute() {
 }
 
 export async function init() {
-  const [base, rev, pending, saved] = await Promise.all([db.get('lib.base'), db.get('lib.rev'), db.get('lib.pending'), db.get('lib.journal')]);
-  state.base = normalize(base);
-  state.rev = rev || null;
+  let saved, pending, logged0, syncedAt;
+  try {
+    [saved, pending, logged0, syncedAt] = await Promise.all([db.get('lib.state'), db.get('lib.pending'), db.get('lib.journal'), db.get('lib.syncedAt')]);
+  } catch (e) {
+    // Never start from an empty library when the real one just couldn't be read:
+    // the next save would replace it.
+    throw new Error(`TabIt couldn’t read its storage on this device (${e?.name || e}). Close the app and open it again.`);
+  }
+  state.base = normalize(saved?.base);
+  state.rev = signedIn() ? saved?.rev || null : null;
   state.pending = readQueue('pending', pending);
-  const logged = readQueue('journal', saved);
+  const logged = readQueue('journal', logged0);
   if (logged.length && !signedIn()) {
     // edits that may not have reached the saved library before the app closed
     // (only ever kept while signed out: signed in, the pending queue does this)
@@ -136,12 +163,15 @@ export async function init() {
     // signed out with edits left over: keep them locally
     state.base = applyOps(state.base, state.pending);
     state.pending = [];
+    baseDirty = true;
+    writeBase();
+    saveQueue('pending', state.pending);
   }
   recompute();
   store.ready = true;
-  store.sync = signedIn() ? { state: state.pending.length ? 'pending' : 'idle', message: '', at: (await db.get('lib.syncedAt')) || '' } : { state: 'local', message: '', at: '' };
+  store.sync = signedIn() ? { state: state.pending.length ? 'pending' : 'idle', message: '', at: syncedAt || '' } : { state: 'local', message: '', at: '' };
   emit();
-  return { fresh: !base && !journal.length };
+  return { fresh: !saved && !journal.length };
 }
 
 // Replaces the whole local library (first run, imports). Not synced by itself.
@@ -151,14 +181,17 @@ export function replaceLocal(lib) {
   clearJournal();
   recompute();
   persist({ base: true });
+  writeBase().then(tellOtherTabs);
   emit();
 }
 
 // ---------- editing ----------
 
 // Lazy ops (play counts) ride along with the next save instead of causing one.
-export function dispatch(op, { lazy = false } = {}) {
+export function dispatch(op, { lazy = false, fromTab = false } = {}) {
+  if (!fromTab) channel?.postMessage({ t: 'op', op });
   if (!signedIn()) {
+    state.rev = null;
     state.base = applyOp(state.base, op);
     journal.push(op);
     saveQueue('journal', journal);
@@ -236,8 +269,9 @@ export async function pull(r = remote(), libKey = getAuth()?.libKey) {
   if (state.rev?.commit === head) return { lib: state.base, rev: state.rev };
   const files = await r.files(head);
   if (!files[INDEX_PATH]) return { lib: null, rev: { commit: head, files } };
+  // (files is null when the list couldn't be loaded after a save: read them all)
   const old = state.rev?.files || {};
-  const known = state.rev ? serializeCache() : null;
+  const known = state.rev?.files ? serializeCache() : null;
   const read = async path => decryptJSON(await r.blob(files[path]), libKey, path);
   const indexObj = await read(INDEX_PATH);
   const shardObjs = await Promise.all(Array.from({ length: SHARDS }, async (_, n) => {
@@ -290,6 +324,9 @@ let syncing = null;
 let timer = null;
 let retryDelay = 4000;
 let lastPull = 0;
+// Signing in or out starts a new session; a sync still running from an older
+// one stops without touching anything.
+let session = 0;
 
 export function scheduleSync(ms = 1500) {
   if (!signedIn()) return;
@@ -299,20 +336,24 @@ export function scheduleSync(ms = 1500) {
 
 export function syncNow() {
   if (!signedIn()) return Promise.resolve();
-  if (syncing) return syncing.then(() => (state.pending.length ? syncNow() : undefined));
+  if (syncing) return syncing.then(() => (state.pending.length && signedIn() ? syncNow() : undefined));
   clearTimeout(timer);
   syncing = doSync().finally(() => { syncing = null; });
   return syncing;
 }
 
 async function doSync() {
+  const my = session;
+  const live = () => my === session;
   const auth = getAuth();
+  if (!auth) return;
   const r = remote(auth.token);
   store.sync = { ...store.sync, state: 'saving', message: '' };
   emit();
   try {
     for (let attempt = 0; attempt < 5; attempt++) {
       const { lib: remoteLib, rev } = await pull(r, auth.libKey);
+      if (!live()) return;
       lastPull = Date.now();
       if (remoteLib && rev) {
         state.base = remoteLib;
@@ -322,30 +363,39 @@ async function doSync() {
       const start = remoteLib || state.base;
       const next = applyOps(start, batch);
       const files = await changedFiles(remoteLib, next, auth.libKey);
+      if (!live()) return;
       if (!Object.keys(files).length && remoteLib) {
         state.base = next;
         state.pending = state.pending.slice(batch.length);
         break;
       }
+      let commit;
       try {
-        const commit = await r.commit({ parent: rev?.commit || null, files, message: commitMessage(batch) });
-        state.base = next;
-        state.rev = { commit, files: await r.files(commit) };
-        state.pending = state.pending.slice(batch.length);
-        break;
+        commit = await r.commit({ parent: rev?.commit || null, files, message: commitMessage(batch) });
       } catch (e) {
         if (e.kind !== 'conflict' || attempt === 4) throw e;
-        // another device saved first: load theirs and rebuild ours on top
+        continue; // another device saved first: load theirs and rebuild ours on top
       }
+      if (!live()) return;
+      // Saved. Whatever fails after this, the batch is part of the synced copy.
+      const saved = { commit, files: null };
+      state.base = next;
+      state.rev = saved;
+      state.pending = state.pending.slice(batch.length);
+      try { saved.files = await r.files(commit); } catch { /* the next load reads every file */ }
+      if (!live()) return;
+      channel?.postMessage({ t: 'synced' });
+      break;
     }
     retryDelay = 4000;
     recompute();
     persist({ base: true });
     const at = new Date().toISOString();
-    db.set('lib.syncedAt', at);
+    db.set('lib.syncedAt', at).catch(() => {});
     store.sync = { state: state.pending.length ? 'pending' : 'saved', message: '', at };
     if (state.pending.length) scheduleSync(800);
   } catch (e) {
+    if (!live()) return;
     recompute();
     persist({ base: true });
     const n = state.pending.length;
@@ -373,14 +423,19 @@ export function maybePull(maxAge = 30_000) {
 
 // First save to GitHub, or joining a library that's already there: everything
 // on this device that isn't in the synced copy is added to it, nothing is lost.
-export function mergeLocalInto(remoteLib) {
+//
+// Signing back in to the library this device was signed out of, `prior` is the
+// synced copy it had then. What was changed here since (including edits that
+// hadn't synced at sign-out) is applied on top, field by field, and songs
+// deleted on other devices in the meantime stay deleted.
+export function mergeLocalInto(remoteLib, prior = null) {
   const ops = [];
   const local = applyOps(state.base, state.pending);
   const byUrl = new Map(Object.values(remoteLib.songs).filter(s => s.src?.url).map(s => [s.src.url, s]));
   const key = s => `${(s.title || '').toLowerCase()}|${(s.artist || '').toLowerCase()}`;
   const byName = new Map(Object.values(remoteLib.songs).map(s => [key(s), s]));
   for (const s of Object.values(local.songs)) {
-    if (remoteLib.songs[s.id]) continue;
+    if (remoteLib.songs[s.id] || prior?.songs[s.id]) continue;
     const twin = (s.src?.url && byUrl.get(s.src.url)) || (s.src?.site === 'legacy' ? byName.get(key(s)) : null);
     if (twin) {
       if (s.fav && !twin.fav) ops.push({ t: 'set', id: twin.id, set: { fav: true } });
@@ -388,13 +443,31 @@ export function mergeLocalInto(remoteLib) {
     }
     ops.push({ t: 'add', song: s });
   }
-  for (const l of Object.values(local.setlists)) if (!remoteLib.setlists[l.id]) ops.push({ t: 'list', id: l.id, set: l });
+  for (const l of Object.values(local.setlists)) {
+    if (!remoteLib.setlists[l.id] && !prior?.setlists[l.id]) ops.push({ t: 'list', id: l.id, set: l });
+  }
+  if (prior) ops.push(...diffOps(prior, local).filter(op => op.t !== 'add' && !(op.t === 'list' && !prior.setlists[op.id])));
   return ops;
 }
 
+// A name for a library that doesn't give its key away.
+function libId(key) {
+  let a = 0x811c9dc5, b = 0x9747b28c;
+  for (const ch of 'tabit-library:' + key) {
+    const c = ch.charCodeAt(0);
+    a = Math.imul(a ^ c, 0x01000193);
+    b = Math.imul(b ^ c, 0x5bd1e995);
+  }
+  return (a >>> 0).toString(16).padStart(8, '0') + (b >>> 0).toString(16).padStart(8, '0');
+}
+
 export async function startSync(auth, { remoteLib, rev } = {}) {
+  const since = await db.get('lib.since').catch(() => null);
+  const prior = remoteLib && since?.lib === libId(auth.libKey) ? normalize(since.base) : null;
+  session++;
   setAuth(auth);
-  const merged = mergeLocalInto(remoteLib || emptyLibrary());
+  const merged = mergeLocalInto(remoteLib || emptyLibrary(), prior);
+  db.del('lib.since').catch(() => {});
   clearJournal();
   if (remoteLib) {
     state.base = remoteLib;
@@ -406,13 +479,20 @@ export async function startSync(auth, { remoteLib, rev } = {}) {
   state.pending = merged;
   recompute();
   persist({ base: true });
+  writeBase().then(tellOtherTabs);
   store.sync = { state: 'pending', message: '', at: '' };
   emit();
   await syncNow();
 }
 
 export function signOut({ keepSongs = true } = {}) {
+  const auth = getAuth();
   const lib = store.lib;
+  session++;
+  // the synced copy as it is now, so signing back in can tell which changes
+  // were made here (see mergeLocalInto)
+  if (keepSongs && auth?.libKey) db.set('lib.since', { lib: libId(auth.libKey), base: state.base }).catch(storageError);
+  else db.del('lib.since').catch(() => {});
   setAuth(null);
   clearJournal();
   clearTimeout(timer);
@@ -421,15 +501,17 @@ export function signOut({ keepSongs = true } = {}) {
   state.pending = [];
   recompute();
   persist({ base: true });
-  db.del('lib.syncedAt');
+  writeBase().then(tellOtherTabs);
+  db.del('lib.syncedAt').catch(() => {});
   store.sync = { state: 'local', message: '', at: '' };
   emit();
 }
 
 export const pendingCount = () => state.pending.length;
 
-// For tests: the raw state.
+// For tests: the raw state, and saving the library now.
 export const _state = state;
+export const _flush = () => writeBase();
 export { RemoteError };
 
 addEventListener('online', () => syncNow());
@@ -440,3 +522,20 @@ document.addEventListener('visibilitychange', () => {
     if (state.pending.length && signedIn()) syncNow();
   }
 });
+
+// ---------- other tabs ----------
+
+// With TabIt open in two tabs, each passes its edits to the other so neither
+// saves over them (the tab that made an edit uploads it; the others catch up
+// when it says it saved). Signing in or out, or replacing the library, reloads
+// the others once the new state is saved.
+const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('tabit-store') : null;
+channel?.addEventListener('message', ({ data }) => {
+  if (!data || !store.ready) return;
+  if (data.t === 'op') dispatch(data.op, { lazy: true, fromTab: true });
+  else if (data.t === 'synced') { if (state.pending.length) syncNow(); }
+  else if (data.t === 'reload') location.reload();
+});
+function tellOtherTabs() {
+  channel?.postMessage({ t: 'reload' });
+}
