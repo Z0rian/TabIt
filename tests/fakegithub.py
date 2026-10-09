@@ -18,10 +18,13 @@ from urllib.parse import urlparse
 
 
 class FakeGitHub:
-    def __init__(self, tokens=(), login='test-owner', private=False, default_branch='main'):
-        self.tokens = set(tokens)
+    def __init__(self, tokens=(), login='test-owner', private=False, default_branch='main', blind=(), readonly=()):
+        self.tokens = set(tokens)  # keys that can read and write the repository
+        self.blind = set(blind)  # real keys that weren't given this repository
+        self.readonly = set(readonly)  # real keys with Contents: read only
         self.login = login
         self.private = private
+        self.exists = True  # False: the repository hasn't been made yet
         # a repository whose default branch isn't "main" puts its first file
         # there, whatever branch is asked for
         self.default_branch = default_branch
@@ -72,10 +75,12 @@ class FakeGitHub:
                 self.send_header('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-GitHub-Api-Version, Accept')
                 self.send_header('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, OPTIONS')
 
-            def _send(self, status, obj=None):
+            def _send(self, status, obj=None, headers=None):
                 body = json.dumps(obj if obj is not None else {}).encode()
                 self.send_response(status)
                 self._cors()
+                for k, v in (headers or {}).items():
+                    self.send_header(k, v)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Content-Length', str(len(body)))
                 self.end_headers()
@@ -86,9 +91,16 @@ class FakeGitHub:
                 self._cors()
                 self.end_headers()
 
-            def _authed(self):
+            def _token(self):
                 a = self.headers.get('Authorization', '')
-                return a.startswith('Bearer ') and a[7:] in fake.tokens
+                return a[7:] if a.startswith('Bearer ') else None
+
+            def _authed(self):
+                return self._token() in fake.tokens
+
+            def _valid(self):
+                t = self._token()
+                return t in fake.tokens or t in fake.blind or t in fake.readonly
 
             def _body(self):
                 n = int(self.headers.get('Content-Length') or 0)
@@ -114,7 +126,7 @@ class FakeGitHub:
                 path = u.path
                 self.query = dict(q.split('=', 1) for q in u.query.split('&') if '=' in q)
                 a = self.headers.get('Authorization', '')
-                if a and not self._authed():
+                if a and not self._valid():
                     return self._send(401, {'message': 'Bad credentials'})
                 with fake.lock:
                     fake.log.append((method, path))
@@ -125,13 +137,20 @@ class FakeGitHub:
 
             def _handle(self, method, path):
                 if path == '/user':
-                    return self._send(200 if self._authed() else 401, {'login': fake.login} if self._authed() else {'message': 'Requires authentication'})
+                    return self._send(200 if self._valid() else 401, {'login': fake.login} if self._valid() else {'message': 'Requires authentication'})
                 m = re.match(r'^/repos/([^/]+)/([^/]+)(/.*)?$', path)
                 if not m:
                     return self._send(404, {'message': 'Not Found'})
+                token = self._token()
+                # GitHub says "Not Found" for what you can't see
+                if not fake.exists or token in fake.blind or (fake.private and not token):
+                    return self._send(404, {'message': 'Not Found'})
                 rest = m.group(3) or ''
                 if rest == '' and method == 'GET':
-                    return self._send(200, {'private': fake.private, 'default_branch': fake.default_branch, 'permissions': {'push': self._authed(), 'pull': True}})
+                    info = {'private': fake.private, 'default_branch': fake.default_branch}
+                    if token and token not in fake.readonly:  # (what GitHub sends for a fine-grained key isn't documented)
+                        info['permissions'] = {'push': True, 'pull': True}
+                    return self._send(200, info)
                 if rest == '/branches' and method == 'GET':
                     return self._send(200, [{'name': k, 'commit': {'sha': v}} for k, v in fake.refs.items()])
                 empty = not fake.refs
@@ -163,7 +182,9 @@ class FakeGitHub:
                     if p not in files:
                         return self._send(404, {'message': 'Not Found'})
                     return self._send(200, {'content': base64.b64encode(files[p].encode()).decode(), 'encoding': 'base64'})
-                # writes need a key
+                # writes need a key that may write
+                if method in ('POST', 'PATCH', 'PUT') and token in fake.readonly:
+                    return self._send(403, {'message': 'Resource not accessible by personal access token'}, {'X-Accepted-GitHub-Permissions': 'contents=write'})
                 if method in ('POST', 'PATCH', 'PUT') and not self._authed():
                     return self._send(401, {'message': 'Requires authentication'})
                 if rest.startswith('/contents/') and method == 'PUT':

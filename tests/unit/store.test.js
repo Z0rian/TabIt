@@ -304,6 +304,45 @@ test('when saving to this device fails, the edit stays in the journal until it w
   ok(saved.base.songs['s-j'], 'and the library has it');
 });
 
+test('opening a backup fills in what a song here is missing, never what you set', async () => {
+  store.signOut({ keepSongs: false });
+  await store.init();
+  store.replaceLocal(emptyLibrary());
+  const { addSongs } = await import('../../js/importer.js');
+  const url = 'https://tabs.ultimate-guitar.com/tab/band/song-chords-1';
+  store.dispatch({ t: 'add', song: makeSong({ id: 's-here', title: 'Song', content: 'x', src: { site: 'ug', url }, notes: 'mine', fav: true, key: 'G' }) });
+  const fromFile = makeSong({ id: 's-file', title: 'Song', content: 'x', src: { site: 'ug', url }, capo: 2, key: 'A', shapes: { G: [[3, 2, 0, 0, 0, 3]] }, strum: [{ part: '', den: 8, m: [1, 101] }], cover: 'https://x/c.jpg', notes: 'theirs' });
+  const other = makeSong({ id: 's-new', title: 'New', content: 'n', src: { site: 'ug', url: url + '9' } });
+  const r = addSongs([fromFile, other]);
+  deepEq([r.added, r.skipped, r.filled], [1, 1, 1]);
+  const s = store.store.lib.songs['s-here'];
+  eq(s.capo, 2);
+  ok(s.shapes?.G && s.strum?.length && s.cover, 'chord shapes, strumming and cover filled in');
+  deepEq([s.notes, s.fav, s.key], ['mine', true, 'G'], 'your notes, favorite and key stay');
+  ok(store.store.lib.songs['s-new'], 'the song that was missing is added');
+
+  // a song that came in through the first worker, in another version
+  store.dispatch({ t: 'add', song: makeSong({ id: 's-thin', title: 'Other Song', artist: 'Band', content: 'version 1', src: { site: 'ug', url: url + '1' }, fav: true, notes: 'n' }) });
+  const exact = makeSong({ id: 's-exact', title: 'Other Song', artist: 'Band', content: 'version 2', src: { site: 'ug', url: url + '2', version: 2 }, capo: 3, shapes: { C: [[-1, 3, 2, 0, 1, 0]] } });
+  deepEq(addSongs([exact]).added, 1, 'an ordinary backup adds it as another version');
+  store.dispatch({ t: 'del', id: 's-exact' });
+  const up = addSongs([exact], [], { upgrade: true });
+  deepEq([up.added, up.filled], [0, 1], 'the favorites file puts its exact version in its place');
+  const t = store.store.lib.songs['s-thin'];
+  deepEq([t.content, t.src.version, t.capo, t.fav, t.notes], ['version 2', 2, 3, true, 'n']);
+  eq(Object.values(store.store.lib.songs).filter(s => s.title === 'Other Song').length, 1, 'no duplicate');
+
+  // two versions of one song, both favorites, both in through the first worker:
+  // one at the right address, the other at a third version's
+  store.dispatch({ t: 'add', song: makeSong({ id: 's-b1', title: 'Bars', artist: 'E', content: 'some other version', src: { site: 'ug', url: url + 'Bx' } }) });
+  store.dispatch({ t: 'add', song: makeSong({ id: 's-b2', title: 'Bars', artist: 'E', content: 'v5', src: { site: 'ug', url: url + 'B5' } }) });
+  const v2 = makeSong({ id: 'f-2', title: 'Bars', artist: 'E', content: 'v2', src: { site: 'ug', url: url + 'B2' }, shapes: { A: [[0, 0, 2, 2, 2, 0]] } });
+  const v5 = makeSong({ id: 'f-5', title: 'Bars', artist: 'E', content: 'v5', src: { site: 'ug', url: url + 'B5' }, shapes: { D: [[-1, -1, 0, 2, 3, 2]] } });
+  addSongs([v2, v5], [], { upgrade: true });
+  const bars = Object.values(store.store.lib.songs).filter(s => s.title === 'Bars').map(s => [s.src.url.slice(-2), s.content, Object.keys(s.shapes || {})[0]]).sort();
+  deepEq(bars, [['B2', 'v2', 'A'], ['B5', 'v5', 'D']], 'each version ends up with its own text and shapes');
+});
+
 test('another tab’s edits arrive here, and this tab’s go to it', async () => {
   store.signOut({ keepSongs: false });
   await store.init();

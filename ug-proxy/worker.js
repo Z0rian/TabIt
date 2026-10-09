@@ -162,13 +162,23 @@ function store(html) {
   return JSON.parse(decodeEntities(match[1]));
 }
 
+// One pass, every entity to its own character (a curly quote stays curly: a
+// plain " would end the JSON string it's in, which is how the first worker
+// broke on pages with quotes in a comment).
+const LATIN1 = 'nbsp iexcl cent pound curren yen brvbar sect uml copy ordf laquo not shy reg macr deg plusmn sup2 sup3 acute micro para middot cedil sup1 ordm raquo frac14 frac12 frac34 iquest Agrave Aacute Acirc Atilde Auml Aring AElig Ccedil Egrave Eacute Ecirc Euml Igrave Iacute Icirc Iuml ETH Ntilde Ograve Oacute Ocirc Otilde Ouml times Oslash Ugrave Uacute Ucirc Uuml Yacute THORN szlig agrave aacute acirc atilde auml aring aelig ccedil egrave eacute ecirc euml igrave iacute icirc iuml eth ntilde ograve oacute ocirc otilde ouml divide oslash ugrave uacute ucirc uuml yacute thorn yuml'.split(' ');
+const ENTITIES = {
+  ...Object.fromEntries(LATIN1.map((name, i) => [name, String.fromCharCode(160 + i)])),
+  quot: '"', amp: '&', lt: '<', gt: '>', apos: "'",
+  rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“', sbquo: '‚', bdquo: '„', ndash: '–', mdash: '—', hellip: '…', bull: '•', middot: '·',
+  trade: '™', euro: '€', prime: '′', Prime: '″', dagger: '†', Dagger: '‡', permil: '‰', lsaquo: '‹', rsaquo: '›',
+  OElig: 'Œ', oelig: 'œ', Scaron: 'Š', scaron: 'š', Yuml: 'Ÿ', fnof: 'ƒ', circ: 'ˆ', tilde: '˜',
+  ensp: '\u2002', emsp: '\u2003', thinsp: '\u2009', zwnj: '\u200c', zwj: '\u200d', lrm: '\u200e', rlm: '\u200f',
+};
 function decodeEntities(s) {
-  return s.replace(/&(#\d+|#x[0-9a-f]+|quot|amp|lt|gt|apos|#039|nbsp|rsquo|lsquo|rdquo|ldquo|ndash|mdash|hellip);/gi, (m, e) => {
-    const k = e.toLowerCase();
-    const named = { quot: '"', amp: '&', lt: '<', gt: '>', apos: "'", '#039': "'", nbsp: ' ', rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“', ndash: '–', mdash: '—', hellip: '…' };
-    if (named[k] !== undefined) return named[k];
-    const n = k[1] === 'x' ? parseInt(k.slice(2), 16) : parseInt(k.slice(1), 10);
-    return Number.isFinite(n) ? String.fromCodePoint(n) : m;
+  return s.replace(/&(#\d+|#x[0-9a-f]+|[a-z][a-z0-9]*);/gi, (m, e) => {
+    if (e[0] !== '#') return ENTITIES[e] ?? m;
+    const n = e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+    return Number.isFinite(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : m;
   });
 }
 

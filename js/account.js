@@ -33,8 +33,49 @@ export function repoUrl() {
   return `https://github.com/new?${q}`;
 }
 
-const cantSee = () => `GitHub can’t find ${cfg.owner}/${cfg.repo} with this key. Check that you made that repository (step 1) and picked it under “Repository access” when making the key.`;
 const today = () => new Date().toISOString().slice(0, 10);
+
+// ---------- what's wrong with a key, in words, with where to fix it ----------
+
+const KEYS_PAGE = 'https://github.com/settings/personal-access-tokens';
+const repoPage = () => `https://github.com/${cfg.owner}/${cfg.repo}`;
+
+function keyNotValid() {
+  return new RemoteError('GitHub doesn’t recognize this key. Copy it again from GitHub (all of it: it starts with github_pat_ and is about 90 characters long), or make a new one.', 401, 'auth',
+    [{ href: tokenUrl(), text: 'Make a new key' }]);
+}
+function cantSave() {
+  return new RemoteError(`This key can read ${cfg.repo} but not save to it. On GitHub, open the key and set Repository permissions → Contents to “Read and write”.`, 403, 'forbidden',
+    [{ href: KEYS_PAGE, text: 'Your keys on GitHub' }]);
+}
+function isPrivate() {
+  return new RemoteError(`Your ${cfg.repo} repository is private, so your other devices couldn’t sign in with a password. Make it public (everything TabIt saves there is encrypted): its Settings → General → Danger Zone → Change visibility. Then try again.`, 0, 'private',
+    [{ href: `${repoPage()}/settings`, text: `${cfg.repo} settings` }]);
+}
+// The key works but GitHub won't show it the repository: find out why.
+async function repoMissing(r) {
+  const visible = await r.isPublic().catch(() => null);
+  if (visible) {
+    return new RemoteError(`Your ${cfg.repo} repository is there, but this key can’t reach it. On GitHub, open the key and under Repository access choose “Only select repositories” → ${cfg.repo}. (A key made before the repository can’t see it until you add it.)`, 404, 'notfound',
+      [{ href: KEYS_PAGE, text: 'Your keys on GitHub' }]);
+  }
+  return new RemoteError(`GitHub has no public repository called ${cfg.repo} on your account (${cfg.owner}). Make it with the pre-filled page: name ${cfg.repo}, Public, then Create repository. If you made it private, make it public instead. Then add it to the key under Repository access, and try again.`, 404, 'notfound',
+    [{ href: repoUrl(), text: `Make ${cfg.repo}` }, { href: KEYS_PAGE, text: 'Your keys on GitHub' }]);
+}
+// Checks a key before anything is saved with it.
+async function checkKey(r) {
+  let perm;
+  try {
+    perm = await r.canWrite();
+  } catch (e) {
+    if (e.kind === 'auth') throw keyNotValid();
+    if (e.kind === 'notfound') throw await repoMissing(r);
+    throw e;
+  }
+  if (perm.push === false) throw cantSave();
+  if (perm.private) throw isPrivate();
+}
+const saving = e => { throw e.kind === 'forbidden' ? cantSave() : e.kind === 'auth' ? keyNotValid() : e; };
 
 // Pre-filled page for making a fine-grained key that can only touch that repository.
 export function tokenUrl() {
@@ -61,12 +102,7 @@ export async function setupWithKey(token) {
   token = String(token || '').trim();
   if (!token) throw new RemoteError('Paste the key first.', 0, 'input');
   const r = remote(token);
-  const perm = await r.canWrite().catch(e => {
-    if (e.kind === 'notfound') throw new RemoteError(cantSee(), 404, 'notfound');
-    throw e;
-  });
-  if (!perm.push) throw new RemoteError('This key can read but not save. Set Contents to “Read and write”.', 403, 'forbidden');
-  if (perm.private) throw new RemoteError(`${cfg.owner}/${cfg.repo} is private, so your other devices couldn’t sign in with a password. Make it public in its Settings (everything TabIt saves there is encrypted), then try again.`, 0, 'private');
+  await checkKey(r);
   const login = await r.whoami();
   // Read with the key (not anonymously): if the repository were private an
   // anonymous read would look like "nothing there" and setup would overwrite it.
@@ -88,7 +124,7 @@ export async function setupWithKey(token) {
     libKey = newLibraryKey();
     access = emptyAccess();
     access.owner = await sealWithToken({ v: 1, libKey }, token);
-    await writeAccess(r, access, 'Set up TabIt sync');
+    await writeAccess(r, access, 'Set up TabIt sync').catch(saving);
   }
   const auth = { token, libKey, via: 'key', login, since: new Date().toISOString() };
   const { lib, rev } = await pull(r, libKey);
@@ -192,11 +228,7 @@ export async function replaceKey(newToken, typed) {
   const keep = typed.filter(t => String(t.password || '').trim());
   if (!keep.length) throw new RemoteError('Type at least one of your passwords, so your other devices can still sign in.', 0, 'input');
   const r = remote(newToken);
-  const perm = await r.canWrite().catch(e => {
-    if (e.kind === 'notfound') throw new RemoteError(cantSee(), 404, 'notfound');
-    throw e;
-  });
-  if (!perm.push) throw new RemoteError('The new key can’t save. Set Contents to “Read and write”.', 403, 'forbidden');
+  await checkKey(r);
   let checked = false;
   for (let attempt = 0; attempt < 4; attempt++) {
     const head = await r.head();
@@ -217,7 +249,7 @@ export async function replaceKey(newToken, typed) {
       await r.commit({ parent: head, files: { [ACCESS_PATH]: JSON.stringify(access, null, 2) + '\n' }, message: 'Switched TabIt sync to a new key' });
     } catch (e) {
       if (e.kind === 'conflict') continue;
-      throw e;
+      saving(e);
     }
     setAuth({ ...auth, token: newToken, via: 'key' });
     syncNow();

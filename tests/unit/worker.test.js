@@ -51,6 +51,23 @@ test('worker: YouTube search gets the first video and its length', async () => {
   eq(seconds(''), null);
 });
 
+// what Ultimate Guitar really sends: every character it has a name for as an
+// entity, curly quotes too, and readers' comments on the same page
+const ugEncode = obj => encode(obj).replace(/[“”‘’éñÉ]/g, c => ({ '“': '&ldquo;', '”': '&rdquo;', '‘': '&lsquo;', '’': '&rsquo;', 'é': '&eacute;', 'ñ': '&ntilde;', 'É': '&Eacute;' })[c]);
+
+test('worker: a page with curly quotes in a comment, and accented names', async () => {
+  const data = {
+    tab: { song_name: 'Café', artist_name: 'Niño', type: 'Chords', version: 1 },
+    tab_view: { wiki_tab: { content: '[ch]G[/ch]\nIt’s “here”' }, comments: [{ text: 'Lyrics are off. It’s “learnin’ that the le…”' }] },
+  };
+  const html = `<div class="js-store" data-content="${ugEncode({ store: { page: { data } } })}"></div>`;
+  const r = await withFetch(html, () => tab('https://tabs.ultimate-guitar.com/tab/nino/cafe-chords-1'));
+  ok(!r.body.error, r.body.error);
+  eq(r.body.content, '[ch]G[/ch]\nIt’s “here”');
+  deepEq([r.body.song.title, r.body.song.artist], ['Café', 'Niño']);
+  eq(decodeEntities('&Eacute;&eacute;&ntilde; &hellip; &bogus; &#233;&#xE9;'), 'Ééñ … &bogus; éé');
+});
+
 test('worker: entities and CORS', () => {
   eq(decodeEntities('a &amp; b &quot;c&quot; &#039;d&#039; &#x41;'), 'a & b "c" \'d\' A');
   ok(corsFor('https://z0rian.github.io')['Access-Control-Allow-Origin']);

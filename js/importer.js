@@ -56,6 +56,22 @@ export function resumeImport() {
   if (job && !job.done && !running) run();
 }
 
+// Another go for the songs that didn't come in (after the worker is updated, say).
+export function retryImport() {
+  if (!job || running) return;
+  let n = 0;
+  for (const e of job.entries) {
+    if (e.status === 'notfound' || e.status === 'failed') { e.status = 'waiting'; e.note = ''; n++; }
+  }
+  if (!n) return;
+  job.done = false;
+  job.cancelled = false;
+  job.paused = null;
+  save();
+  emit();
+  run();
+}
+
 async function run() {
   if (running) return;
   running = true;
@@ -139,13 +155,14 @@ async function importOne(e) {
 // ---------- files ----------
 
 // A TabIt backup ({ app: 'tabit', songs: [...], setlists: [...] }) or the old
-// app's export (an array) → { songs, setlists }.
+// app's export (an array) → { songs, setlists, upgrade }. `upgrade` marks a
+// file of exact Ultimate Guitar versions (the Tabs & Chords favorites file).
 export function readBackup(text) {
   const data = JSON.parse(text);
   if (Array.isArray(data)) return { songs: Object.values(convert(data)?.songs || {}), setlists: [] };
   if (data && data.app === 'tabit' && Array.isArray(data.songs)) {
     const lib = normalize({ setlists: Object.fromEntries((Array.isArray(data.setlists) ? data.setlists : []).filter(l => l?.id).map(l => [l.id, l])) });
-    return { songs: data.songs.filter(s => s && s.content).map(s => makeSong({ ...s, id: s.id })), setlists: Object.values(lib.setlists) };
+    return { songs: data.songs.filter(s => s && s.content).map(s => makeSong({ ...s, id: s.id })), setlists: Object.values(lib.setlists), upgrade: data.upgrade === true };
   }
   if (data && data.songs && typeof data.songs === 'object') {
     const lib = normalize(data);
@@ -154,17 +171,59 @@ export function readBackup(text) {
   throw new Error('That file isn’t a TabIt backup.');
 }
 
-// Adds the songs (and setlists) that aren't in the library yet. A song that's
-// already here under another id keeps its place in the setlists it came with.
-export function addSongs(songs, setlists = []) {
-  let added = 0, skipped = 0;
+// What a song from a file can add to the same song already in the library:
+// details Ultimate Guitar knows (the first worker didn't pass them on). Never
+// anything you set yourself.
+const DETAILS = ['capo', 'tuning', 'bpm', 'shapes', 'strum', 'cover'];
+
+// Adds the songs (and setlists) that aren't in the library yet, and fills in
+// missing details of the ones that are. A song that's already here under
+// another id keeps its place in the setlists it came with.
+//
+// With `upgrade` (a file of exact versions), a song that came in through the
+// first worker, with none of those details and perhaps in another version, is
+// replaced by the file's version: favorite, notes and settings stay.
+export function addSongs(songs, setlists = [], { upgrade = false } = {}) {
+  let added = 0, skipped = 0, filled = 0;
   const lib = store.lib;
   const byUrl = new Map(Object.values(lib.songs).filter(s => s.src?.url).map(s => [s.src.url, s.id]));
+  const nameOf = s => `${fold(s.title)}|${fold(s.artist)}`;
+  // (upgrade) songs here without details that no song in the file matches
+  // exactly, by name: each can stand in for one song of the file
+  const inFile = new Set(songs.map(s => s.src?.url).filter(Boolean));
+  const thin = new Map();
+  if (upgrade) {
+    for (const s of Object.values(lib.songs)) {
+      if (s.src?.site !== 'ug' || s.shapes || s.strum || inFile.has(s.src.url)) continue;
+      if (!thin.has(nameOf(s))) thin.set(nameOf(s), []);
+      thin.get(nameOf(s)).push(s.id);
+    }
+  }
   const idFor = new Map();
   const ops = [];
   for (const s of songs) {
-    const have = lib.songs[s.id] ? s.id : s.src?.url && byUrl.get(s.src.url);
-    if (have) { idFor.set(s.id, have); skipped++; continue; }
+    let have = lib.songs[s.id] ? s.id : s.src?.url && byUrl.get(s.src.url);
+    let replace = false;
+    if (!have && s.src?.site === 'ug' && thin.get(nameOf(s))?.length) {
+      have = thin.get(nameOf(s)).shift();
+      replace = true;
+      if (s.src.url) byUrl.set(s.src.url, have);
+    }
+    if (have) {
+      idFor.set(s.id, have);
+      skipped++;
+      const cur = lib.songs[have];
+      const set = {};
+      if (replace) {
+        // the version's own text and details, all of them (a cover can stay)
+        for (const k of ['content', 'src', 'kind', 'key']) if (s[k] != null) set[k] = s[k];
+        for (const k of DETAILS) if (k !== 'cover' || s[k] != null) set[k] = s[k] ?? null;
+      } else if (cur.src?.url && cur.src.url === s.src?.url) {
+        for (const k of DETAILS) if (cur[k] == null && s[k] != null) set[k] = s[k];
+      }
+      if (Object.keys(set).length) { ops.push({ t: 'set', id: have, set }); filled++; }
+      continue;
+    }
     if (s.src?.url) byUrl.set(s.src.url, s.id);
     idFor.set(s.id, s.id);
     ops.push({ t: 'add', song: s });
@@ -178,7 +237,7 @@ export function addSongs(songs, setlists = []) {
     lists++;
   }
   if (ops.length) dispatch({ t: 'many', ops });
-  return { added, skipped, lists };
+  return { added, skipped, lists, filled };
 }
 
 export function exportLibrary() {

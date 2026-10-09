@@ -92,6 +92,7 @@ def main():
         webkit.close()
     gh.stop()
     other_default_branch(base)
+    key_mistakes(base)
     if errors:
         print('Console errors:')
         for e in errors:
@@ -117,6 +118,48 @@ def other_default_branch(base):
         b.close()
     gh.stop()
     check('main' in gh.refs and {'access.json', 'library/index.json'} <= set(gh.files_at('main')), 'setup still keeps everything on "main"')
+
+
+def key_mistakes(base):
+    print('9. each kind of wrong key gets its own explanation, with where to fix it')
+    gh = FakeGitHub(tokens={'github_pat_good'}, blind={'github_pat_blind'}, readonly={'github_pat_readonly'})
+    gh.exists = False
+    api = gh.start()
+    with sync_playwright() as p:
+        b = launch(p, 'chromium')
+        ctx = context_for(p, b, 'laptop')
+        ctx.add_init_script(f"localStorage.setItem('tabit.dev.api', {api!r})")
+        page = ctx.new_page()
+        crashes = []
+        page.on('pageerror', lambda e: crashes.append(str(e)))
+        page.goto(base + '/#/settings?setup')
+        key = page.get_by_placeholder('github_pat_…')
+        err = page.locator('.sub-panel .error')
+
+        def attempt(token, says, link, what):
+            key.fill(token)
+            page.get_by_role('button', name='Set up sync').click()
+            expect(err).to_contain_text(says, timeout=15000)
+            expect(err.get_by_role('link', name=link)).to_be_visible()
+            check(True, f'{what}: “{says}…” with a link to {link}')
+
+        attempt('github_pat_typo', 'GitHub doesn’t recognize this key', 'Make a new key', 'a key GitHub doesn’t know')
+        attempt('github_pat_good', 'GitHub has no public repository called tabit-data', 'Make tabit-data', 'the repository isn’t made yet')
+        gh.exists, gh.private = True, True
+        attempt('github_pat_good', 'repository is private', 'tabit-data settings', 'a private repository')
+        gh.private = False
+        attempt('github_pat_blind', 'is there, but this key can’t reach it', 'Your keys on GitHub', 'a key without the repository')
+        attempt('github_pat_readonly', 'can read tabit-data but not save to it', 'Your keys on GitHub', 'a read-only key')
+        check(not gh.refs, 'nothing was saved by any of them')
+        # the key typed into the password box, the first box on the screen
+        page.get_by_placeholder('Your TabIt password').fill('github_pat_good')
+        page.get_by_role('button', name='Sign in').click()
+        expect(page.get_by_role('heading', name='Passwords')).to_be_visible(timeout=20000)
+        check('access.json' in gh.files_at(), 'a key typed into the password box sets up sync too')
+        if crashes:
+            raise AssertionError(crashes)
+        b.close()
+    gh.stop()
 
 
 def run(laptop, phone, gh, api, base):

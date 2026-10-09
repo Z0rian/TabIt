@@ -28,6 +28,12 @@ export function view(route, { go }) {
 
   // ---------- sync ----------
   let busyText = '';
+  // an error, with the links that say where to fix it
+  const showError = (el, ex, offline = 'No connection right now. Try again when you’re online.') => {
+    if (ex.kind === 'offline') { fill(el, offline); return; }
+    fill(el, ex.message, ...(ex.links || []).flatMap(l => [' ', h('a', { href: l.href, target: '_blank', rel: 'noopener' }, l.text)]));
+  };
+  const looksLikeKey = v => /^\s*(github_pat_|ghp_)/.test(v);
   // the password list, read once per visit to this page (and after a change):
   // the page redraws on every sync step
   let pwCache = null;
@@ -50,11 +56,17 @@ export function view(route, { go }) {
       btn.lastChild.textContent = 'Signing in…';
       err.textContent = '';
       try {
-        await signInWithPassword(pw.value);
-        toast(`Signed in. ${Object.keys(store.lib.songs).length} songs on this device.`);
+        // a GitHub key typed here instead of under "Set up sync" works too
+        if (looksLikeKey(pw.value)) {
+          await setupWithKey(pw.value);
+          toast('Sync is on. Now add a password for your other devices.');
+        } else {
+          await signInWithPassword(pw.value);
+          toast(`Signed in. ${Object.keys(store.lib.songs).length} songs on this device.`);
+        }
         drawSync();
       } catch (ex) {
-        err.textContent = ex.kind === 'offline' ? 'No connection right now. Try again when you’re online.' : ex.message;
+        showError(err, ex);
         btn.disabled = false;
         btn.lastChild.textContent = 'Sign in';
       }
@@ -89,7 +101,7 @@ export function view(route, { go }) {
           toast('Sync is on. Now add a password for your other devices.');
           drawSync();
         } catch (ex) {
-          err.textContent = ex.kind === 'offline' ? 'No connection right now.' : ex.message;
+          showError(err, ex);
           btn.disabled = false;
           btn.lastChild.textContent = 'Set up sync';
         }
@@ -174,7 +186,7 @@ export function view(route, { go }) {
           err.textContent = '';
           toast('Key replaced');
           drawSync();
-        } catch (ex) { err.textContent = ex.message; }
+        } catch (ex) { showError(err, ex); }
       } }, field('New GitHub key', key), boxes, err, button('Replace key', null, { type: 'submit', cls: 'btn-small' })));
   }
 

@@ -51,6 +51,7 @@ def main():
         by_url[r.get('fallback', r['match'])['url']] = r
         by_url[r['match']['url']] = r
     calls = {'search': 0, 'tab': 0}
+    broken = set()  # tabs the old worker couldn't read
 
     def proxy(route):
         q = parse_qs(urlparse(route.request.url).query)
@@ -66,6 +67,8 @@ def main():
                     return route.fulfill(content_type='application/json', body=json.dumps({'results': res}))
             return route.fulfill(content_type='application/json', body=json.dumps({'results': []}))
         if action == 'tab':
+            if q['url'][0] in broken:
+                return route.fulfill(status=500, content_type='application/json', body=json.dumps({'error': "Expected ',' or '}' after property value in JSON at position 45131 (line 1 column 45132)"}))
             r = by_url.get(q['url'][0])
             if not r or not r.get('content'):
                 return route.fulfill(status=404, content_type='application/json', body=json.dumps({'error': 'Tab content not found on page'}))
@@ -118,6 +121,28 @@ def main():
         check(n == 5, f'after reopening it finished the job ({n} songs)')
         log = page.evaluate("JSON.parse(localStorage.getItem('tabit.import')).entries.map(e => e.status)")
         check('working' not in log and 'waiting' not in log, f'nothing left half done ({log})')
+
+        print('[retry] a song the old worker couldn’t read, then "Try it again"')
+        ctx.unroute(PROXY + '/**')
+        ctx.route(PROXY + '/**', proxy)
+        riptide_url = load('050-vance-joy-riptide-v2')['match']['url']
+        broken.add(riptide_url)
+        page.evaluate("async () => { const s = await import('/js/store.js'); for (const x of Object.values(s.store.lib.songs)) s.dispatch({ t: 'del', id: x.id }); }")
+        page.goto(base + '/#/import')
+        page.get_by_role('button', name='Import another list').click()
+        page.get_by_role('textbox', name='Your Tabs & Chords list').fill(tc_list(recs))
+        page.get_by_role('button', name='Import 6 songs').click()
+        expect(page.get_by_text('Import finished')).to_be_visible(timeout=60000)
+        summary = page.locator('.card p').first.inner_text()
+        check('1 couldn’t be loaded' in summary and 'not found' not in summary, f'counted as “couldn’t be loaded”, not “not found” ({summary})')
+        first = page.locator('.import-log li').first
+        check('Riptide' in first.inner_text() and 'Updating the TabIt worker fixes this' in first.inner_text(), f'listed first, in plain words: {first.inner_text()!r}')
+        broken.clear()
+        page.get_by_role('button', name='Try it again').click()
+        expect(page.get_by_text('Import finished')).to_be_visible(timeout=60000)
+        n = page.evaluate("async () => Object.keys((await import('/js/store.js')).store.lib.songs).length")
+        summary = page.locator('.card p').first.inner_text()
+        check(n == 5 and 'couldn' not in summary, f'trying again brings it in ({n} songs; {summary})')
         if errors:
             raise AssertionError(errors)
         b.close()

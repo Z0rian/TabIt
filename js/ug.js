@@ -29,7 +29,8 @@ async function call(params, { signal, timeout = 20000 } = {}) {
   clearTimeout(t);
   let data;
   try { data = await res.json(); } catch { throw new Error(`Ultimate Guitar answered with an error (${res.status}).`); }
-  if (data.error) throw new Error(data.error);
+  // (the first worker couldn't read some pages: curly quotes in a reader's comment broke them)
+  if (data.error) throw new Error(/JSON/.test(data.error) ? 'Ultimate Guitar’s page for it couldn’t be read. Updating the TabIt worker fixes this.' : data.error);
   return data;
 }
 

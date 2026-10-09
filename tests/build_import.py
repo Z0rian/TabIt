@@ -30,7 +30,7 @@ BUILD = """async () => {
     const song = ug.songFromTab(result, tab, { fav: true, added: rec.entry.date });
     songs.push(song);
   }
-  return JSON.stringify({ app: 'tabit', v: 1, exported: new Date().toISOString(), note: 'Tabs & Chords favorites with their Ultimate Guitar versions, capo, key, tuning and chord shapes.', songs, setlists: [] }, null, 1);
+  return JSON.stringify({ app: 'tabit', v: 1, exported: new Date().toISOString(), note: 'Tabs & Chords favorites with their Ultimate Guitar versions, capo, key, tuning, chord shapes and strumming. Opening it again fills in songs brought in without these.', upgrade: true, songs, setlists: [] }, null, 1);
 }"""
 
 

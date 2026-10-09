@@ -2,7 +2,7 @@
 
 import { h, icon, iconButton, button, toast, seg, fill } from '../ui.js';
 import { parseTCList } from '../ug.js';
-import { startImport, cancelImport, clearImport, importJob, subscribeImport, resumeImport, readBackup, addSongs } from '../importer.js';
+import { startImport, cancelImport, clearImport, importJob, subscribeImport, resumeImport, retryImport, readBackup, addSongs } from '../importer.js';
 import { store } from '../store.js';
 
 const STATUS = { waiting: ['clock', 'Waiting'], working: ['sync', 'Finding…'], done: ['check', ''], close: ['check', ''], skipped: ['check', ''], notfound: ['close', ''], failed: ['close', ''] };
@@ -64,8 +64,12 @@ export function view(route, { go, back }) {
       const ok = job.entries.filter(e => ['done', 'close'].includes(e.status)).length;
       const skipped = job.entries.filter(e => e.status === 'skipped').length;
       const bad = job.entries.filter(e => ['notfound', 'failed'].includes(e.status));
+      const notFound = bad.filter(e => e.status === 'notfound').length;
+      const failed = bad.length - notFound;
       const bar = h('div', { class: 'progress', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(n), 'aria-valuenow': String(finished) }, h('i', { style: { width: `${(finished / n) * 100}%` } }));
-      const list = h('ul', { class: 'import-log' }, job.entries.map(e => {
+      // once it's done, the ones that didn't come in are listed first
+      const order = job.done ? [...bad, ...job.entries.filter(e => !bad.includes(e))] : job.entries;
+      const list = h('ul', { class: 'import-log' }, order.map(e => {
         const [ic, label] = STATUS[e.status] || STATUS.waiting;
         return h('li', { class: ['notfound', 'failed'].includes(e.status) ? 'bad' : '' }, icon(ic, { size: 16 }),
           h('span', { style: { flex: 1 } }, `${e.artist} — ${e.title}${e.version > 1 ? ` (ver ${e.version})` : ''}`),
@@ -73,10 +77,11 @@ export function view(route, { go, back }) {
       }));
       fill(body, h('div', { class: 'card' },
         h('h2', {}, job.done ? (job.cancelled ? 'Import stopped' : 'Import finished') : `Importing ${finished + 1 > n ? n : finished + 1} of ${n}…`),
-        h('p', {}, `${ok} added${skipped ? `, ${skipped} already there` : ''}${bad.length ? `, ${bad.length} not found` : ''}.${job.paused === 'offline' ? ' Waiting for a connection…' : ''}`),
+        h('p', {}, `${ok} added${skipped ? `, ${skipped} already there` : ''}${failed ? `, ${failed} couldn’t be loaded` : ''}${notFound ? `, ${notFound} not found` : ''}.${job.paused === 'offline' ? ' Waiting for a connection…' : ''}`),
         bar,
-        h('div', { class: 'btn-row', style: { display: 'flex', gap: '8px', margin: '14px 0 4px' } },
+        h('div', { class: 'btn-row', style: { display: 'flex', flexWrap: 'wrap', gap: '8px', margin: '14px 0 4px' } },
           job.done ? button('Done', () => { clearImport(); go('#/'); }, { cls: 'btn-primary' }) : button('Stop', () => cancelImport(), { cls: 'btn-danger' }),
+          job.done && bad.length ? button(`Try ${bad.length === 1 ? 'it' : `these ${bad.length}`} again`, () => retryImport(), { iconName: 'sync' }) : null,
           job.done ? button('Import another list', () => { clearImport(); draw(); }, { cls: 'btn-ghost' }) : button('Browse while it works', () => go('#/'), { cls: 'btn-ghost' })),
         list));
     };
@@ -91,10 +96,10 @@ export function view(route, { go, back }) {
       const f = input.files?.[0];
       if (!f) return;
       try {
-        const { songs, setlists } = readBackup(await f.text());
-        const res = addSongs(songs, setlists);
+        const { songs, setlists, upgrade } = readBackup(await f.text());
+        const res = addSongs(songs, setlists, { upgrade });
         toast(addedText(res));
-        if (res.added || res.lists) go('#/');
+        if (res.added || res.lists || res.filled) go('#/');
       } catch (e) {
         toast(e.message || 'Couldn’t read that file.');
       }
@@ -113,10 +118,10 @@ export function view(route, { go, back }) {
       const f = e.dataTransfer.files?.[0];
       if (!f) return;
       try {
-        const { songs, setlists } = readBackup(await f.text());
-        const res = addSongs(songs, setlists);
+        const { songs, setlists, upgrade } = readBackup(await f.text());
+        const res = addSongs(songs, setlists, { upgrade });
         toast(addedText(res));
-        if (res.added || res.lists) go('#/');
+        if (res.added || res.lists || res.filled) go('#/');
       } catch (err) { toast(err.message); }
     });
     fill(body, drop, h('p', { class: 'hint' }, `Your library has ${Object.keys(store.lib.songs).length} songs. Nothing is replaced; songs you already have are skipped.`));
@@ -126,9 +131,9 @@ export function view(route, { go, back }) {
   return { el, title: 'Import', tab: 'library', destroy() { unsub?.(); } };
 }
 
-function addedText({ added, skipped, lists }) {
+function addedText({ added, skipped, lists, filled }) {
   const parts = [`${added} song${added === 1 ? '' : 's'} added`];
   if (lists) parts.push(`${lists} setlist${lists === 1 ? '' : 's'}`);
-  if (skipped) parts.push(`${skipped} already there`);
+  if (skipped) parts.push(`${skipped} already there${filled ? ` (${filled} given their capo, chord shapes and so on)` : ''}`);
   return parts.join(', ');
 }

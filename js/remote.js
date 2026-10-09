@@ -8,10 +8,12 @@
 // store.js rebuilds its changes on top of the newer copy.
 
 export class RemoteError extends Error {
-  constructor(message, status = 0, kind = 'server') {
+  // links: [{ href, text }] to show with the message (what to fix, on GitHub)
+  constructor(message, status = 0, kind = 'server', links = []) {
     super(message);
     this.status = status;
     this.kind = kind; // offline | auth | forbidden | notfound | conflict | rate | server
+    this.links = links;
   }
 }
 
@@ -179,9 +181,23 @@ export class GitHubRemote {
     try { return (await this.request(`${API}/user`)).login || ''; } catch { return ''; }
   }
 
+  // What the key can do with the repository. `push` is null when GitHub
+  // doesn't say (then the first save shows whether it can write).
   async canWrite() {
     const j = await this.request(this.base);
-    return { push: !!j.permissions?.push, private: !!j.private };
+    return { push: j.permissions ? !!j.permissions.push : null, private: !!j.private };
+  }
+
+  // Whether anyone can see the repository (true), or GitHub shows nothing
+  // there (false: it doesn't exist, or it's private).
+  async isPublic() {
+    try {
+      await this.request(this.base, { auth: false });
+      return true;
+    } catch (e) {
+      if (e.kind === 'notfound') return false;
+      throw e;
+    }
   }
 }
 
@@ -254,6 +270,7 @@ export class MockRemote {
 
   async whoami() { return 'test-owner'; }
   async canWrite() { await this.wait(); return { push: true, private: false }; }
+  async isPublic() { await this.wait(); return true; }
 
   // test helper: another device edits the library
   static reset() { localStorage.removeItem(MOCK_KEY); MockRemote.log = []; }
