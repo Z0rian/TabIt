@@ -259,6 +259,7 @@ const MIN_CLARITY = 0.8; // weaker readings count as silence
 const MEDIAN = 5; // accepted readings in the outlier median
 const OUTLIER = 15; // cents: a reading this far from the median is replaced by it
 const START_FRAMES = 2; // agreeing readings before the needle appears, so a click doesn't show a note
+const START_TIME = 0.07; // seconds those readings must span (a new note, or a jump to another string)
 const AGREE = 30; // cents: consecutive readings of a new note must agree this well
 const HYSTERESIS = 60; // cents from the shown note before its name changes
 const SETTLE = 20; // cents: a median this close to the needle counts as settled
@@ -328,9 +329,14 @@ export class PitchTracker {
   // it's a new string and the needle jumps there instead of sweeping the dial.
   consider(x, t, clarity) {
     const run = this.run;
-    if (run.length && Math.abs(x - run[run.length - 1]) > AGREE) run.length = 0;
+    if (run.length && Math.abs(x - run[run.length - 1]) > AGREE) { run.length = 0; this.runStart = t; }
+    if (!run.length) this.runStart = t;
     run.push(x);
     if (run.length < (this.y === null ? START_FRAMES : this.snapFrames)) return;
+    // A pluck's first few dozen milliseconds are noise; so is a window still
+    // half full of silence. A new note has to hold for a moment, whatever the
+    // frame rate (a 120 Hz iPad would otherwise decide twice as fast).
+    if (t - this.runStart < START_TIME) return;
     this.y = median(run);
     this.recent = run.slice(-MEDIAN);
     this.run = [];

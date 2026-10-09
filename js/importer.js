@@ -16,7 +16,12 @@ let running = false;
 const emit = () => listeners.forEach(fn => fn(job));
 
 function load() {
-  try { return JSON.parse(localStorage.getItem(KEY)) || null; } catch { return null; }
+  let j = null;
+  try { j = JSON.parse(localStorage.getItem(KEY)) || null; } catch { return null; }
+  // the app was closed in the middle of a song: that one starts over
+  if (j?.entries) for (const e of j.entries) if (e.status === 'working') e.status = 'waiting';
+  if (j && !j.done && !j.cancelled && j.entries?.some(e => e.status === 'waiting')) j.paused = null;
+  return j;
 }
 function save() {
   try { if (job) localStorage.setItem(KEY, JSON.stringify(job)); else localStorage.removeItem(KEY); } catch { /* full */ }

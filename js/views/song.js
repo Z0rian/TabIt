@@ -31,9 +31,15 @@ export function view(route, { go, back }) {
 
   // per-song view settings (synced with the song; in memory for a preview)
   const vs = () => song.view || {};
+  // applied here at once, so quick taps (transpose, transpose) add up even
+  // before the store has passed the change back
   const setView = set => {
-    if (isPreview) { session.preview = song = { ...song, view: { ...vs(), ...set } }; redraw(); return; }
+    const view = { ...vs(), ...set };
+    for (const k of Object.keys(view)) if (view[k] === null || view[k] === undefined) delete view[k];
+    song = { ...song, view };
+    if (isPreview) { session.preview = song; redraw(); return; }
     dispatch({ t: 'view', id, set });
+    redraw();
   };
 
   let doc = parseSong(song.content);
@@ -527,7 +533,10 @@ export function view(route, { go, back }) {
     if (!next) { if (!isPreview) go('#/'); return; }
     if (next === song) return;
     const contentChanged = next.content !== song.content;
+    const shown = s => JSON.stringify([s.view || {}, s.fav, s.title, s.artist, s.key, s.capo, s.tuning, s.notes, s.duration, s.yt, s.shapes || null, s.src?.version]);
+    const same = !contentChanged && shown(next) === shown(song);
     song = next;
+    if (same) { deck.update(); return; } // only a play count or the like
     if (contentChanged) doc = parseSong(song.content);
     redraw();
   }

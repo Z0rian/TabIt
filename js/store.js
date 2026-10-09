@@ -61,17 +61,51 @@ export function _useRemote(factory) { makeRemote = factory; }
 
 // Pending edits are written at once (they're small); the whole library a
 // moment later, and straight away when the app is hidden or closed.
+//
+// Signed out, the library itself is the only copy, and Safari doesn't finish a
+// write that starts as the page goes away. So each edit also goes into a small
+// journal, written at once, that start-up replays (ops are safe to replay).
 let persistTimer = null;
 let baseDirty = false;
+let journal = [];
+
+// Small queues also go to localStorage, which is written synchronously and so
+// survives the app being closed the instant after a tap; big ones (an import
+// of hundreds of songs) only to IndexedDB.
+function saveQueue(name, ops) {
+  db.set(`lib.${name}`, ops);
+  try {
+    const text = JSON.stringify(ops);
+    if (text.length < 250_000) localStorage.setItem(`tabit.${name}`, text);
+    else localStorage.removeItem(`tabit.${name}`);
+  } catch {
+    try { localStorage.removeItem(`tabit.${name}`); } catch { /* no storage */ }
+  }
+}
+function readQueue(name, fromDb) {
+  try {
+    const v = JSON.parse(localStorage.getItem(`tabit.${name}`));
+    if (Array.isArray(v)) return v;
+  } catch { /* fall back */ }
+  return Array.isArray(fromDb) ? fromDb : [];
+}
 function writeBase() {
   clearTimeout(persistTimer);
   if (!baseDirty) return;
   baseDirty = false;
-  db.set('lib.base', state.base);
-  db.set('lib.rev', state.rev);
+  const n = journal.length;
+  Promise.all([db.set('lib.base', state.base), db.set('lib.rev', state.rev)]).then(() => {
+    if (!n) return;
+    journal = journal.slice(n);
+    saveQueue('journal', journal);
+  });
+}
+function clearJournal() {
+  journal = [];
+  saveQueue('journal', journal);
 }
 function persist({ base = false } = {}) {
-  db.set('lib.pending', state.pending);
+  saveQueue('pending', state.pending);
   if (base) {
     baseDirty = true;
     clearTimeout(persistTimer);
@@ -85,10 +119,19 @@ function recompute() {
 }
 
 export async function init() {
-  const [base, rev, pending] = await Promise.all([db.get('lib.base'), db.get('lib.rev'), db.get('lib.pending')]);
+  const [base, rev, pending, saved] = await Promise.all([db.get('lib.base'), db.get('lib.rev'), db.get('lib.pending'), db.get('lib.journal')]);
   state.base = normalize(base);
   state.rev = rev || null;
-  state.pending = Array.isArray(pending) ? pending : [];
+  state.pending = readQueue('pending', pending);
+  const logged = readQueue('journal', saved);
+  if (logged.length && !signedIn()) {
+    // edits that may not have reached the saved library before the app closed
+    // (only ever kept while signed out: signed in, the pending queue does this)
+    state.base = applyOps(state.base, logged);
+    journal = logged;
+    baseDirty = true;
+    writeBase();
+  }
   if (!signedIn() && state.pending.length) {
     // signed out with edits left over: keep them locally
     state.base = applyOps(state.base, state.pending);
@@ -98,13 +141,14 @@ export async function init() {
   store.ready = true;
   store.sync = signedIn() ? { state: state.pending.length ? 'pending' : 'idle', message: '', at: (await db.get('lib.syncedAt')) || '' } : { state: 'local', message: '', at: '' };
   emit();
-  return { fresh: !base };
+  return { fresh: !base && !journal.length };
 }
 
 // Replaces the whole local library (first run, imports). Not synced by itself.
 export function replaceLocal(lib) {
   state.base = normalize(lib);
   state.pending = [];
+  clearJournal();
   recompute();
   persist({ base: true });
   emit();
@@ -116,6 +160,8 @@ export function replaceLocal(lib) {
 export function dispatch(op, { lazy = false } = {}) {
   if (!signedIn()) {
     state.base = applyOp(state.base, op);
+    journal.push(op);
+    saveQueue('journal', journal);
     recompute();
     persist({ base: true });
     emit();
@@ -349,6 +395,7 @@ export function mergeLocalInto(remoteLib) {
 export async function startSync(auth, { remoteLib, rev } = {}) {
   setAuth(auth);
   const merged = mergeLocalInto(remoteLib || emptyLibrary());
+  clearJournal();
   if (remoteLib) {
     state.base = remoteLib;
     state.rev = rev;
@@ -367,6 +414,7 @@ export async function startSync(auth, { remoteLib, rev } = {}) {
 export function signOut({ keepSongs = true } = {}) {
   const lib = store.lib;
   setAuth(null);
+  clearJournal();
   clearTimeout(timer);
   state.base = keepSongs ? lib : emptyLibrary();
   state.rev = null;

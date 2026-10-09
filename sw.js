@@ -7,7 +7,7 @@
 // The list below is written by scripts/build.py. Run it before committing.
 
 // BUILD-START
-const BUILD = '97c7b0bb09';
+const BUILD = 'd9f52560db';
 const PRECACHE = [
   './',
   'index.html',

@@ -305,19 +305,24 @@ test('stray readings inside the snap range do not twitch the needle', () => {
   ok(worst < 0.5, `worst deviation ${worst.toFixed(2)} cents`);
 });
 
-test('a jump that persists for snapFrames is followed', () => {
+test('a jump is followed once it holds for snapFrames readings and 70 ms', () => {
   const tr = new PitchTracker();
   let s;
   for (let k = 0; k < FPS; k++) s = tr.update(reading(110), k / FPS);
-  s = tr.update(reading(220), 1);
-  s = tr.update(reading(220), 1 + 1 / FPS);
-  eq(s.name + s.octave, 'A2', 'two frames are not enough');
-  s = tr.update(reading(220), 1 + 2 / FPS);
-  eq(s.name + s.octave, 'A3', 'three are');
+  // 50 ms of a new pitch: as long as a pluck's attack, not followed
+  for (let k = 0; k <= 3; k++) s = tr.update(reading(220), 1 + k / FPS);
+  eq(s.name + s.octave, 'A2', 'a jump lasting 50 ms is not followed');
+  s = tr.update(reading(220), 1 + 5 / FPS);
+  eq(s.name + s.octave, 'A3', 'one lasting 83 ms is');
   near(cents(s.freq, 220), 0, 0.01);
-  const slow = new PitchTracker({ snapFrames: 5 });
+  // on a 120 Hz screen the same 70 ms applies, not the same number of frames
+  const fast = new PitchTracker();
+  for (let k = 0; k < 120; k++) fast.update(reading(110), k / 120);
+  for (let k = 0; k < 6; k++) s = fast.update(reading(220), 1 + k / 120);
+  eq(s.octave, 2, '6 frames at 120 Hz (42 ms) are still too short');
+  const slow = new PitchTracker({ snapFrames: 8 });
   for (let k = 0; k < FPS; k++) slow.update(reading(110), k / FPS);
-  for (let k = 0; k < 4; k++) s = slow.update(reading(220), 1 + k / FPS);
+  for (let k = 0; k < 7; k++) s = slow.update(reading(220), 1 + k / FPS);
   eq(s.octave, 2, 'snapFrames is configurable');
 });
 
@@ -372,7 +377,9 @@ test('holds the last reading through a dropout, then goes inactive', () => {
   s = tr.update(reading(220), 3);
   eq(s.active, false, 'a lone reading does not bring the needle back');
   s = tr.update(reading(220), 3 + 1 / FPS);
-  ok(s.active && s.name + s.octave === 'A3', 'two agreeing ones do');
+  eq(s.active, false, 'nor do two right away (a pluck starts with noise)');
+  for (let k = 2; k <= 5; k++) s = tr.update(reading(220), 3 + k / FPS);
+  ok(s.active && s.name + s.octave === 'A3', 'readings that agree for 70 ms do');
 });
 
 test('stable and inTune wait for the needle to settle', () => {

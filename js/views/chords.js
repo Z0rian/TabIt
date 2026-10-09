@@ -24,7 +24,7 @@ export function view(route) {
 
   const rootRow = h('div', { class: 'root-row', role: 'group', 'aria-label': 'Root note' });
   const typeRow = h('div', { class: 'qual-row', role: 'group', 'aria-label': 'Chord type' });
-  const input = h('input', { class: 'input', placeholder: 'Or type any chord: Bbmaj7#11/F', value: custom, autocapitalize: 'off', spellcheck: 'false', 'aria-label': 'Any chord' });
+  const input = h('input', { class: 'input', placeholder: 'Any chord, like Bbmaj7/F', value: custom, autocapitalize: 'off', spellcheck: 'false', 'aria-label': 'Any chord', enterkeyhint: 'go' });
   const tuningSel = h('select', { class: 'select', 'aria-label': 'Tuning', style: { maxWidth: '170px' } }, ...Object.entries(TUNING_LABEL).map(([k, l]) => h('option', { value: k }, l)));
   tuningSel.value = tuning;
   const title = h('h2', { class: 'voicing-name', style: { fontSize: '44px', margin: '18px 0 2px' } });
@@ -62,7 +62,7 @@ export function view(route) {
     rootRow,
     h('div', { style: { height: '8px' } }),
     typeRow,
-    h('div', { style: { display: 'flex', gap: '8px', marginTop: '8px' } }, h('div', { class: 'search', style: { flex: 1 } }, icon('search'), input), tuningSel),
+    h('div', { style: { display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' } }, h('div', { class: 'search', style: { flex: '1 1 220px' } }, icon('search'), input), tuningSel),
     title, sub, grid);
   return { el, title: 'Chords', tab: 'chords' };
 }

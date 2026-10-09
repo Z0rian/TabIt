@@ -143,7 +143,8 @@ export class AutoScroll {
 
   frame(now) {
     if (!this.playing) return;
-    const dt = Math.min(0.1, (now - this.last) / 1000);
+    // (capped so a frame after the app was in the background doesn't leap ahead)
+    const dt = Math.min(0.3, (now - this.last) / 1000);
     this.last = now;
     if (!this.hold) {
       const f = this.follow?.();
