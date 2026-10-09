@@ -1,7 +1,8 @@
 // A song: the sheet, its chord shapes, autoscroll, transpose/capo, the YouTube
 // player, and everything in the ⋯ menu.
 
-import { h, icon, iconButton, button, drawer, toast, toggle, confirmSheet, promptSheet, fmtTime, parseTime, fill } from '../ui.js';
+import { h, icon, iconButton, button, drawer, toast, toggle, confirmSheet, promptSheet, fmtTime, parseTime, fill, initials } from '../ui.js';
+import { coverOf, findCover, NO_COVER } from '../covers.js';
 import { store, subscribe, dispatch, undoable } from '../store.js';
 import { newId } from '../model.js';
 import { parseSong, toPlainText } from '../parse.js';
@@ -117,16 +118,24 @@ export function view(route, { go, back }) {
     const sh = shift();
     const key = baseKey();
     const chips = [];
-    if (key) chips.push(h('span', { class: 'chip accent' }, `Key ${sh ? transposeKey(key, sh) : key}`));
-    if ((+vs().tr || 0) !== 0) chips.push(h('span', { class: 'chip' }, `${vs().tr > 0 ? '+' : ''}${vs().tr} semitone${Math.abs(vs().tr) === 1 ? '' : 's'}`));
+    // the key, and next to it what opens the transpose menu (either one does)
+    const tr = +vs().tr || 0;
+    if (key) chips.push(h('button', { type: 'button', class: 'chip accent chip-btn', 'aria-label': `Key ${sh ? transposeKey(key, sh) : key}: transpose`, onClick: openTranspose }, `Key ${sh ? transposeKey(key, sh) : key}`));
+    chips.push(h('button', { type: 'button', class: `chip chip-btn${tr ? ' accent' : ''}`, 'aria-label': tr ? `Transposed ${signed(tr)}: change` : 'Transpose', onClick: openTranspose },
+      icon('transpose'), tr ? `${signed(tr)} semitone${Math.abs(tr) === 1 ? '' : 's'}` : 'Transpose'));
     if (capoNow()) chips.push(h('span', { class: 'chip accent' }, `Capo ${capoNow()}`));
     else if (origCapo()) chips.push(h('span', { class: 'chip' }, 'No capo'));
     if (song.tuning && song.tuning !== 'E A D G B E') chips.push(h('span', { class: 'chip', title: song.tuning }, tuningKey() !== 'standard' ? TUNINGS[tuningKey()].name : `Tuning ${song.tuning}`));
     if (song.bpm) chips.push(h('span', { class: 'chip' }, `${song.bpm} bpm`));
     if (song.src?.site === 'ug') chips.push(h('span', { class: 'chip' }, `UG ver ${song.src.version || 1}${song.src.rating ? ` · ★${(+song.src.rating).toFixed(1)}` : ''}`));
-    fill(headEl, 
-      h('h1', {}, song.title),
-      h('p', { class: 'by' }, song.artist ? h('a', { href: `#/?q=${encodeURIComponent(song.artist)}`, onClick: e => { e.preventDefault(); session.query = song.artist; go('#/'); } }, song.artist) : ''),
+    const cover = coverOf(song);
+    const tile = () => initials(song.artist || song.title);
+    fill(headEl,
+      h('div', { class: 'song-title-row' },
+        h('div', { class: 'song-art', 'aria-hidden': 'true' }, cover ? h('img', { src: cover, alt: '', onError: e => e.target.replaceWith(tile()) }) : tile()),
+        h('div', { class: 'song-title-text' },
+          h('h1', {}, song.title),
+          h('p', { class: 'by' }, song.artist ? h('a', { href: `#/?q=${encodeURIComponent(song.artist)}`, onClick: e => { e.preventDefault(); session.query = song.artist; go('#/'); } }, song.artist) : ''))),
       h('div', { class: 'song-meta' }, chips),
       isPreview ? h('div', { class: 'preview-banner' }, icon('cloud'), h('span', {}, 'From Ultimate Guitar. Save it to keep it offline and in sync.'), button('Save', () => saveIt(false), { cls: 'btn-primary btn-small' })) : null,
       song.notes ? h('p', { class: 'hint', style: { whiteSpace: 'pre-wrap', margin: '10px 0 0' } }, song.notes) : null,
@@ -285,8 +294,7 @@ export function view(route, { go, back }) {
       fill(body, 
         toolRow('Transpose', key ? `Key ${transposeKey(key, tr)}${tr ? ` (was ${key})` : ''}` : 'Moves every chord up or down',
           stepper(tr === 0 ? '0' : (tr > 0 ? `+${tr}` : String(tr)), () => { setView({ tr: wrap(tr - 1) || null }); draw(); }, () => { setView({ tr: wrap(tr + 1) || null }); draw(); })),
-        toolRow('Capo', capoNow() !== origCapo() ? `Shapes change, it sounds the same (tab: ${origCapo() ? `capo ${origCapo()}` : 'no capo'})` : 'Change it and the chord shapes follow',
-          stepper(capoNow() ? `Fret ${capoNow()}` : 'None', () => { const c = Math.max(0, capoNow() - 1); setView({ capo: c === origCapo() ? null : c }); draw(); }, () => { const c = Math.min(11, capoNow() + 1); setView({ capo: c === origCapo() ? null : c }); draw(); })),
+        capoRow(draw),
         toolRow('Text size', 'Or pinch the song to zoom',
           stepper(String(vs().fs || fontSize()), () => { setView({ fs: Math.max(12, (vs().fs || fontSize()) - 1) }); draw(); }, () => { setView({ fs: Math.min(40, (vs().fs || fontSize()) + 1) }); draw(); })),
         toolRow('Simplify chords', 'Cmaj7 → C, Am7 → Am, Dsus4 → D', toggle(vs().simplify, v => { setView({ simplify: v || null }); })),
@@ -299,6 +307,42 @@ export function view(route, { go, back }) {
     draw();
   }
   const wrap = n => ((n + 17) % 12 + 12) % 12 - 5; // keep within -5..+6
+  const signed = n => (n > 0 ? `+${n}` : String(n));
+
+  function capoRow(redrawMenu) {
+    const set = c => { setView({ capo: c === origCapo() ? null : c }); redrawMenu(); };
+    return toolRow('Capo', capoNow() !== origCapo() ? `Shapes change, it sounds the same (tab: ${origCapo() ? `capo ${origCapo()}` : 'no capo'})` : 'Change it and the chord shapes follow',
+      stepper(capoNow() ? `Fret ${capoNow()}` : 'None', () => set(Math.max(0, capoNow() - 1)), () => set(Math.min(11, capoNow() + 1))));
+  }
+
+  // ---------- transpose ----------
+  // Up or down a semitone at a time, or straight to a key; the chords and
+  // their shapes follow.
+  function openTranspose() {
+    const body = h('div', { class: 'transpose' });
+    drawer({ title: 'Transpose', body });
+    const draw = () => {
+      const tr = +vs().tr || 0;
+      const key = baseKey();
+      const capoShift = shift() - tr; // shapes move when the capo does
+      const keyAt = n => transposeKey(key, n + capoShift);
+      const to = n => { setView({ tr: n || null }); draw(); };
+      fill(body,
+        h('p', { class: 'transpose-now' }, key
+          ? (tr ? h('span', {}, 'Key ', h('b', {}, keyAt(tr)), `, ${signed(tr)} from ${keyAt(0)}`) : h('span', {}, 'Key ', h('b', {}, keyAt(0)), ', as written'))
+          : (tr ? `${signed(tr)} semitone${Math.abs(tr) === 1 ? '' : 's'}` : 'As written')),
+        toolRow('Up or down', 'A semitone at a time', stepper(tr ? signed(tr) : '0', () => to(wrap(tr - 1)), () => to(wrap(tr + 1)))),
+        h('div', { class: 'key-grid', role: 'group', 'aria-label': key ? 'Pick a key' : 'Pick how far' },
+          ...Array.from({ length: 12 }, (_, i) => i - 5).map(n => h('button', {
+            type: 'button', class: n === 0 ? 'orig' : '', 'aria-pressed': String(n === tr),
+            'aria-label': key ? `${keyAt(n)}${n === 0 ? ' (as written)' : ` (${signed(n)})`}` : `${signed(n)} semitones`,
+            onClick: () => to(n),
+          }, key ? keyAt(n) : signed(n), h('small', {}, n === 0 ? 'written' : signed(n))))),
+        capoRow(draw),
+        tr ? button('Back to the original key', () => to(0), { cls: 'btn-ghost' }) : null);
+    };
+    draw();
+  }
 
   // ---------- more ----------
   function openMore() {
@@ -315,6 +359,19 @@ export function view(route, { go, back }) {
     rows.push(menuRow('repeat', 'Other versions', 'Every version of this song on Ultimate Guitar', () => { close(); otherVersions(); }));
     rows.push(menuRow('share', 'Copy as text', 'Chords over lyrics, to paste anywhere', () => { close(); copyText(); }));
     if (song.src?.url) rows.push(menuRow('link', 'Open on Ultimate Guitar', '', () => { close(); window.open(song.src.url, '_blank', 'noopener'); }));
+    if (!isPreview) {
+      rows.push(coverOf(song)
+        ? menuRow('image', 'Remove the album cover', 'If it’s the wrong one. It won’t be looked up again.', () => { close(); dispatch({ t: 'set', id, set: { cover: NO_COVER } }); })
+        : menuRow('image', 'Find the album cover', 'On Ultimate Guitar, then Apple Music', async () => {
+          close();
+          toast('Looking for the cover…', { ms: 2000 });
+          try {
+            const cover = await findCover(song);
+            if (cover) dispatch({ t: 'set', id, set: { cover } });
+            else toast('No cover found for this song.');
+          } catch { toast('Couldn’t look right now. Are you online?'); }
+        }));
+    }
     if (!isPreview) rows.push(menuRow('trash', 'Delete song', '', async () => {
       close();
       const undo = undoable({ t: 'del', id });
@@ -556,7 +613,7 @@ export function view(route, { go, back }) {
     if (!next) { if (!isPreview) go('#/'); return; }
     if (next === song) return;
     const contentChanged = next.content !== song.content;
-    const shown = s => JSON.stringify([s.view || {}, s.fav, s.title, s.artist, s.key, s.capo, s.tuning, s.bpm, s.notes, s.duration, s.yt, s.shapes || null, s.strum || null, s.src?.version]);
+    const shown = s => JSON.stringify([s.view || {}, s.fav, s.title, s.artist, s.key, s.capo, s.tuning, s.bpm, s.notes, s.duration, s.yt, s.cover, s.shapes || null, s.strum || null, s.src?.version]);
     const same = !contentChanged && shown(next) === shown(song);
     song = next;
     if (same) { deck.update(); return; } // only a play count or the like

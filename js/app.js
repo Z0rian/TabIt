@@ -5,6 +5,7 @@ import * as store from './store.js';
 import { prefs, applyTheme } from './prefs.js';
 import { oldLibrary, markMigrated, oldTheme, shrinkCovers } from './migrate.js';
 import { requestPersist } from './db.js';
+import { startCovers } from './covers.js';
 
 const VIEWS = {
   library: () => import('./views/library.js'),
@@ -112,6 +113,7 @@ async function boot() {
   requestPersist();
   registerServiceWorker();
   setTimeout(() => shrinkCovers(Object.values(store.store.lib.songs), op => store.dispatch(op, { lazy: true })), 3000);
+  startCovers();
 }
 
 function registerServiceWorker() {

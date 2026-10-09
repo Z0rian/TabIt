@@ -7,12 +7,14 @@ Live at **https://z0rian.github.io/TabIt/**. Add it to the home screen
 
 ## What's in it
 
-- **Library**: favorites, recently played (on any device), by artist, setlists.
+- **Library**: favorites, recently played (on any device), by artist, setlists,
+  album covers (found by themselves, from Ultimate Guitar or Apple's catalog).
   One search box looks through your songs first, then Ultimate Guitar with
   every version of a song.
 - **Songs**: each chord sits exactly over the syllable it belongs to, at any
   width, zoom or font. Tap a chord to swipe through its shapes (the tab
-  author's own first) and hear it. Transpose, capo (the shapes change, the
+  author's own first) and hear it. Transpose with the button next to the key
+  (a semitone at a time, or straight to any key), capo (the shapes change, the
   pitch stays), simplify chords, lyrics only, classic monospace layout,
   pinch or Ctrl+wheel to zoom. Notes per song. The tab author's strumming
   patterns, with the count under each stroke, and Play strums them in time on

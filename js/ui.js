@@ -40,6 +40,7 @@ const S = (d, extra = '') => `<svg viewBox="0 0 24 24" fill="none" stroke="curre
 
 // A small, consistent stroke icon set drawn for this app.
 const ICONS = {
+  image: S('<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m4.5 18 5-5 3.5 3.5 3-3 3.5 3.5"/>'),
   library: S('<path d="M5 4.5h3.2v15H5zM10.4 4.5h3.2v15h-3.2z"/><path d="m15.8 5.3 3-.8 3.4 14.6-3 .8z"/>'),
   chords: S('<rect x="5" y="3.5" width="14" height="17" rx="2"/><path d="M9.7 3.5v17M14.3 3.5v17M5 8.3h14M5 13h14"/><circle cx="9.7" cy="10.7" r="1.3" fill="currentColor"/><circle cx="14.3" cy="15.5" r="1.3" fill="currentColor"/>'),
   tuner: S('<path d="M4 15a8 8 0 0 1 16 0"/><path d="m12 15 3.5-5.5"/><circle cx="12" cy="15" r="1.4" fill="currentColor"/><path d="M4 19h16"/>'),

@@ -7,7 +7,7 @@
 // The list below is written by scripts/build.py. Run it before committing.
 
 // BUILD-START
-const BUILD = '542fbce91f';
+const BUILD = 'c18dc916e5';
 const PRECACHE = [
   './',
   'index.html',
@@ -17,6 +17,7 @@ const PRECACHE = [
   'js/app.js',
   'js/audio.js',
   'js/autoscroll.js',
+  'js/covers.js',
   'js/crypto.js',
   'js/db.js',
   'js/diagram.js',
@@ -103,7 +104,7 @@ self.addEventListener('fetch', event => {
   }
 
   // album covers: keep a copy so the library looks the same offline
-  if (req.destination === 'image' && /ultimate-guitar\.com$|ytimg\.com$/.test(url.hostname)) {
+  if (req.destination === 'image' && /ultimate-guitar\.com$|ytimg\.com$|mzstatic\.com$/.test(url.hostname)) {
     event.respondWith(staleWhileRevalidate(req));
   }
   // everything else (Ultimate Guitar, GitHub, YouTube) goes straight to the network

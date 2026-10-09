@@ -8,6 +8,7 @@ import { searchUG, groupResults, fetchTab, songFromTab } from '../ug.js';
 import { prefs } from '../prefs.js';
 import { session } from '../session.js';
 import { syncPill } from './common.js';
+import { coverOf } from '../covers.js';
 
 const FILTERS = [['all', 'All'], ['fav', 'Favorites'], ['recent', 'Recent'], ['artists', 'Artists'], ['lists', 'Setlists']];
 
@@ -167,7 +168,7 @@ export function view(route, { go }) {
 }
 
 export function songRow(s, { go, artist = true, onOpen } = {}) {
-  const art = h('div', { class: 'row-art', 'aria-hidden': 'true' }, s.cover ? h('img', { src: s.cover, alt: '', loading: 'lazy', onError: e => e.target.replaceWith(initials(s.artist || s.title)) }) : initials(s.artist || s.title));
+  const art = h('div', { class: 'row-art', 'aria-hidden': 'true' }, coverOf(s) ? h('img', { src: coverOf(s), alt: '', loading: 'lazy', onError: e => e.target.replaceWith(initials(s.artist || s.title)) }) : initials(s.artist || s.title));
   const fav = h('button', {
     type: 'button', class: `icon-btn ${s.fav ? 'fav' : ''}`, 'aria-label': s.fav ? 'Remove from favorites' : 'Add to favorites', 'aria-pressed': String(!!s.fav),
     onClick: e => { e.stopPropagation(); dispatch({ t: 'set', id: s.id, set: { fav: s.fav ? null : true } }); },
