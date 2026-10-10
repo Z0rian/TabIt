@@ -155,7 +155,7 @@ export function diffOps(from, to) {
   const ops = [];
   for (const [id, s] of Object.entries(to.songs)) {
     const old = from.songs[id];
-    if (!old) { ops.push({ t: 'add', song: s }); continue; }
+    if (!old) { ops.push({ t: 'add', song: { ...s, id } }); continue; } // (your part's entries have no id of their own)
     const { view: v0, ...a } = old;
     const { view: v1, ...b } = s;
     const set = changed(a, b);
@@ -176,6 +176,115 @@ export function diffOps(from, to) {
   const prefs = changed(from.prefs, to.prefs);
   if (Object.keys(prefs).length) ops.push({ t: 'prefs', set: prefs });
   return ops;
+}
+
+// ---------- the shared songbook and your own part of it ----------
+//
+// Signed in, the songs belong to a songbook everyone in it shares; what's
+// yours (favorite, transpose and capo, chosen shapes, notes, what you played)
+// is kept apart, with your setlists. The screen shows the two together, so
+// every op above still works on the whole; splitOp says which part of an op
+// goes where.
+
+export const PERSONAL_FIELDS = ['fav', 'view', 'played', 'plays', 'notes'];
+const isPersonal = k => PERSONAL_FIELDS.includes(k);
+
+export const sharedPart = s => Object.fromEntries(Object.entries(s).filter(([k]) => !isPersonal(k)));
+export const personalPart = s => Object.fromEntries(Object.entries(s).filter(([k]) => isPersonal(k)));
+
+// → [op for the songbook or null, op for your part or null]
+export function splitOp(op) {
+  switch (op.t) {
+    case 'add': {
+      const mine = personalPart(op.song || {});
+      return [{ t: 'add', song: sharedPart(op.song || {}) }, Object.keys(mine).length ? { t: 'set', id: op.song.id, set: mine } : null];
+    }
+    case 'set': {
+      const shared = sharedPart(op.set || {});
+      const mine = personalPart(op.set || {});
+      return [Object.keys(shared).length ? { t: 'set', id: op.id, set: shared } : null, Object.keys(mine).length ? { t: 'set', id: op.id, set: mine } : null];
+    }
+    case 'del': return [op, op];
+    case 'many': {
+      const a = [], b = [];
+      for (const o of op.ops) {
+        const [x, y] = splitOp(o);
+        if (x) a.push(x);
+        if (y) b.push(y);
+      }
+      return [a.length ? { t: 'many', ops: a } : null, b.length ? { t: 'many', ops: b } : null];
+    }
+    default: return [null, op]; // view, list, list-del, prefs
+  }
+}
+
+// Your part: { songs: { id: { fav, view… } }, setlists, prefs }. Unlike the
+// songbook's, a change to a song you have nothing saved for yet makes the entry.
+export function applyMine(lib, op) {
+  switch (op.t) {
+    case 'add': return applyMine(lib, { t: 'set', id: op.song?.id, set: personalPart(op.song || {}) });
+    case 'set': {
+      if (!op.id) return lib;
+      const next = clean({ ...(lib.songs[op.id] || {}), ...personalPart(op.set || {}) });
+      const songs = { ...lib.songs };
+      if (Object.keys(next).length) songs[op.id] = next; else delete songs[op.id];
+      return { ...lib, songs };
+    }
+    case 'view': {
+      if (!op.id) return lib;
+      const view = clean({ ...(lib.songs[op.id]?.view || {}), ...op.set });
+      return applyMine(lib, { t: 'set', id: op.id, set: { view: Object.keys(view).length ? view : null } });
+    }
+    case 'del': {
+      const songs = { ...lib.songs };
+      delete songs[op.id];
+      const setlists = {};
+      for (const [k, l] of Object.entries(lib.setlists)) setlists[k] = l.songs.includes(op.id) ? { ...l, songs: l.songs.filter(x => x !== op.id) } : l;
+      return { ...lib, songs, setlists };
+    }
+    case 'many': return op.ops.reduce(applyMine, lib);
+    default: return applyOp(lib, op); // setlists and settings, as anywhere
+  }
+}
+
+export function normalizeMine(raw) {
+  const lib = emptyLibrary();
+  if (!raw || typeof raw !== 'object') return lib;
+  for (const [id, s] of Object.entries(raw.songs || {})) {
+    if (!s || typeof s !== 'object') continue;
+    const mine = personalPart(s);
+    if (Object.keys(mine).length) lib.songs[id] = mine;
+  }
+  const rest = normalize({ setlists: raw.setlists, prefs: raw.prefs });
+  lib.setlists = rest.setlists;
+  lib.prefs = rest.prefs;
+  return lib;
+}
+
+// A whole library → the songbook's part and yours.
+export function splitLibrary(lib) {
+  const shared = emptyLibrary();
+  const mine = emptyLibrary();
+  for (const [id, s] of Object.entries(lib.songs || {})) {
+    shared.songs[id] = sharedPart(s);
+    const m = personalPart(s);
+    if (Object.keys(m).length) mine.songs[id] = m;
+  }
+  mine.setlists = lib.setlists || {};
+  mine.prefs = lib.prefs || {};
+  return { shared, mine };
+}
+
+// What the screen shows: every song in the songbook, with your part on it.
+// (A songbook from before it was shared can still have its owner's part in
+// it, until one of the owner's devices takes it: never shown as anyone's.)
+export function joinLibrary(shared, mine) {
+  const songs = {};
+  for (const [id, s] of Object.entries(shared.songs)) {
+    const own = mine.songs[id];
+    songs[id] = own || PERSONAL_FIELDS.some(k => k in s) ? { ...sharedPart(s), ...own, id } : s;
+  }
+  return { v: 1, songs, setlists: mine.setlists, prefs: mine.prefs };
 }
 
 // Makes a library read from storage or the network safe to use.

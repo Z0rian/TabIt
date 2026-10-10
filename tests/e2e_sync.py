@@ -1,14 +1,18 @@
-"""Two devices syncing through the UI, against a fake GitHub (tests/fakegithub.py)
-that starts as a brand-new, empty data repository:
+"""The shared songbook through the UI, against a fake GitHub (tests/fakegithub.py)
+that starts as a brand-new, empty data repository. Three devices: the owner's
+laptop (Edge), and a friend's iPhone and iPad (WebKit).
 
-  1. the laptop (Edge) has a few songs, sets up sync with a GitHub key, adds a password
-  2. the iPhone (WebKit) signs in with that password and gets the library
-  3. edits on either side reach the other
-  4. the phone loses GitHub, both edit, the phone comes back: nothing is lost
-  5. delete and undo; what's stored on "GitHub" is encrypted (no titles or lyrics)
-  6. signing out with a change that hasn't synced, then back in, keeps it
-  7. the key is revoked: the laptop replaces it (retyping the password), the
-     phone signs in again with the same password
+  1. the laptop has a few songs (two favorites); the owner sets up the songbook
+     with a GitHub key, makes an invite for friends and an account of their own
+  2. the friend's phone signs in with the invite: the songs, none of the
+     owner's favorites; the friend makes an account (no GitHub)
+  3. the friend's favorite stays theirs; a songbook edit reaches the laptop
+  4. the friend's iPad signs in with their account: their favorites come along
+  5. the phone loses GitHub, both edit, the phone comes back: nothing is lost
+  6. delete for everyone, and undo; what's stored on "GitHub" is encrypted
+  7. signing out with a change that hasn't synced, then back in, keeps it
+  8. the key is revoked: the laptop pastes a new one (no passwords typed), the
+     friend's devices pick it up by themselves
 
     python tests/e2e_sync.py
 """
@@ -34,6 +38,10 @@ SONGS = [
     {'id': 's-four', 'title': 'Porch Light', 'artist': 'Ana Example', 'content': '[ch]E[/ch]\nLeave it on for me'},
 ]
 
+INVITE = 'banjo river tuesday'
+OWNER_PW = 'the owners own words'
+SAM_PW = 'sams very own password'
+
 
 def check(cond, msg):
     if not cond:
@@ -45,21 +53,50 @@ def song_state(page, sid):
     return page.evaluate("async id => { const s = await import('/js/store.js'); return s.store.lib.songs[id] || null; }", sid)
 
 
+def sync_state(page):
+    return page.evaluate("async () => { const s = await import('/js/store.js'); return [s.store.sync.state, s.pendingCount()]; }")
+
+
 def wait_synced(page, timeout=20):
     t0 = time.time()
     while time.time() - t0 < timeout:
-        st = page.evaluate("async () => { const s = await import('/js/store.js'); return [s.store.sync.state, s.pendingCount()]; }")
+        st = sync_state(page)
         if st[0] in ('saved', 'idle') and st[1] == 0:
             return
         time.sleep(0.25)
     raise AssertionError(f'never synced: {st}')
 
 
+def wait_offline(page):
+    for _ in range(60):
+        st = sync_state(page)
+        if st[0] in ('offline', 'error'):
+            return st
+        time.sleep(0.25)
+    return st
+
+
 def sync_now(page):
     page.evaluate("async () => { const s = await import('/js/store.js'); await s.syncNow(); }")
 
 
-# from step 7 on, GitHub rightly refuses the revoked key; the browser logs those
+def edit(page, op):
+    page.evaluate("async op => (await import('/js/store.js')).dispatch(op)", op)
+
+
+def sign_in(page, base, password):
+    page.goto(base + '/#/settings')
+    page.get_by_placeholder('Your TabIt password').fill(password)
+    page.get_by_role('button', name='Sign in').click()
+    expect(page.get_by_role('heading', name='Invites')).to_be_visible(timeout=30000)
+    wait_synced(page)
+
+
+def favorites(page):
+    return page.evaluate("async () => Object.values((await import('/js/store.js')).store.lib.songs).filter(s => s.fav).map(s => s.id).sort()")
+
+
+# from step 8 on, GitHub rightly refuses the revoked key; the browser logs those
 EXPECTED = {'401': False}
 
 
@@ -71,20 +108,19 @@ def main():
     with sync_playwright() as p:
         edge = launch(p, 'chromium')
         webkit = launch(p, 'webkit')
-        lctx = context_for(p, edge, 'laptop')
-        pctx = context_for(p, webkit, 'iphone-15')
-        for ctx in (lctx, pctx):
+        ctxs = [context_for(p, edge, 'laptop'), context_for(p, webkit, 'iphone-15'), context_for(p, webkit, 'ipad-mini')]
+        for ctx in ctxs:
             ctx.add_init_script(f"localStorage.setItem('tabit.dev.api', {api!r})")
-        laptop, phone = lctx.new_page(), pctx.new_page()
-        for name, pg in (('laptop', laptop), ('phone', phone)):
+        laptop, phone, ipad = (c.new_page() for c in ctxs)
+        for name, pg in (('laptop', laptop), ('phone', phone), ('ipad', ipad)):
             pg.on('pageerror', lambda e, n=name: errors.append(f'{n}: {e}'))
             pg.on('console', lambda m, n=name: errors.append(f'{n}: {m.text}') if m.type == 'error' and not (EXPECTED['401'] and 'status of 401' in m.text) else None)
 
         try:
-            run(laptop, phone, gh, api, base)
+            run(laptop, phone, ipad, gh, api, base)
         except Exception:
-            laptop.screenshot(path='tests/out/sync-fail-laptop.png')
-            phone.screenshot(path='tests/out/sync-fail-phone.png')
+            for name, pg in (('laptop', laptop), ('phone', phone), ('ipad', ipad)):
+                pg.screenshot(path=f'tests/out/sync-fail-{name}.png')
             for e in errors:
                 print('  console:', e)
             raise
@@ -98,11 +134,11 @@ def main():
         for e in errors:
             print('  ', e)
         sys.exit(1)
-    print('Sync works between the two devices.')
+    print('The shared songbook works between the three devices.')
 
 
 def other_default_branch(base):
-    print('8. a data repository whose default branch is "master"')
+    print('9. a data repository whose default branch is "master"')
     gh = FakeGitHub(tokens={'tok-1'}, default_branch='master')
     api = gh.start()
     with sync_playwright() as p:
@@ -121,7 +157,7 @@ def other_default_branch(base):
 
 
 def key_mistakes(base):
-    print('9. each kind of wrong key gets its own explanation, with where to fix it')
+    print('10. each kind of wrong key gets its own explanation, with where to fix it')
     gh = FakeGitHub(tokens={'github_pat_good'}, blind={'github_pat_blind'}, readonly={'github_pat_readonly'})
     gh.exists = False
     api = gh.start()
@@ -154,148 +190,161 @@ def key_mistakes(base):
         # the key typed into the password box, the first box on the screen
         page.get_by_placeholder('Your TabIt password').fill('github_pat_good')
         page.get_by_role('button', name='Sign in').click()
-        expect(page.get_by_role('heading', name='Passwords')).to_be_visible(timeout=20000)
-        check('access.json' in gh.files_at(), 'a key typed into the password box sets up sync too')
+        expect(page.get_by_role('heading', name='Invites')).to_be_visible(timeout=20000)
+        check('access.json' in gh.files_at(), 'a key typed into the password box sets up the songbook too')
         if crashes:
             raise AssertionError(crashes)
         b.close()
     gh.stop()
 
 
-def run(laptop, phone, gh, api, base):
-    if True:
-        print('1. laptop: songs, then owner setup with a key')
-        laptop.goto(base + '/#/')
-        laptop.wait_for_selector('main .page')
-        check(laptop.evaluate(SEED, SONGS) == 4, 'four songs on the laptop')
-        laptop.goto(base + '/#/settings')
-        laptop.get_by_text('First time? Set up sync').click()
-        laptop.get_by_placeholder('github_pat_…').fill('tok-owner-123')
-        laptop.get_by_role('button', name='Set up sync').click()
-        expect(laptop.get_by_role('heading', name='Passwords')).to_be_visible(timeout=20000)
-        wait_synced(laptop)
-        files = gh.files_at()
-        check('access.json' in files and 'library/index.json' in files, 'sign-in file and library on GitHub')
-        blob = ''.join(files.values())
-        check(not any(w in blob for w in ['Sunrise', 'Morning comes', 'Testers', 'Highway']), 'no titles, artists or lyrics in plain text on GitHub')
+def run(laptop, phone, ipad, gh, api, base):
+    print('1. laptop: songs, then the owner sets up the songbook with a key')
+    laptop.goto(base + '/#/')
+    laptop.wait_for_selector('main .page')
+    check(laptop.evaluate(SEED, SONGS) == 4, 'four songs on the laptop, two of them favorites')
+    laptop.goto(base + '/#/settings')
+    laptop.get_by_text('Starting a songbook of your own?').click()
+    laptop.get_by_placeholder('github_pat_…').fill('tok-owner-123')
+    laptop.get_by_role('button', name='Set up sync').click()
+    expect(laptop.get_by_role('heading', name='Invites')).to_be_visible(timeout=20000)
+    wait_synced(laptop)
+    files = gh.files_at()
+    check('access.json' in files and 'library/index.json' in files, 'sign-in file and songbook on GitHub')
+    blob = ''.join(files.values())
+    check(not any(w in blob for w in ['Sunrise', 'Morning comes', 'Testers', 'Highway']), 'no titles, artists or lyrics in plain text on GitHub')
 
-        laptop.get_by_placeholder('e.g. banjo river tuesday').fill('too short')
-        laptop.get_by_placeholder('e.g. banjo river tuesday').fill('banjo river tuesday')
-        laptop.get_by_placeholder('Label (not secret), e.g. Me').fill('Me')
-        laptop.get_by_role('button', name='Add password').click()
-        expect(laptop.get_by_text('Added 20', exact=False).first).to_be_visible(timeout=20000)
-        check('banjo' not in gh.files_at()['access.json'], 'the password itself is not stored')
+    invite = laptop.get_by_placeholder('e.g. campfire songs 2026')
+    invite.fill('short')
+    laptop.get_by_role('button', name='Make an invite').click()
+    expect(laptop.get_by_text('Use at least 8 characters')).to_be_visible()
+    invite.fill(INVITE)
+    laptop.get_by_placeholder('Not secret, e.g. Friends').fill('Friends')
+    laptop.get_by_role('button', name='Make an invite').click()
+    expect(laptop.locator('.set-row', has_text='Friends')).to_be_visible(timeout=20000)
+    check('banjo' not in gh.files_at()['access.json'], 'the invite password itself is not stored')
 
-        print('2. phone: sign in with the password')
-        phone.goto(base + '/#/settings')
-        phone.get_by_placeholder('Your TabIt password').fill('wrong password')
-        phone.get_by_role('button', name='Sign in').click()
-        expect(phone.get_by_text('That password didn’t work', exact=False)).to_be_visible(timeout=20000)
-        phone.get_by_placeholder('Your TabIt password').fill('  Banjo River TUESDAY ')
-        phone.get_by_role('button', name='Sign in').click()
-        expect(phone.get_by_role('heading', name='Passwords')).to_be_visible(timeout=30000)
-        wait_synced(phone)
-        phone.goto(base + '/#/')
-        expect(phone.locator('h1.page-title')).to_contain_text('4 songs', timeout=10000)
-        check(phone.get_by_text('Sunrise Waltz').is_visible(), 'the phone has the laptop\'s songs')
+    laptop.get_by_label('Your name').fill('Owner')
+    laptop.get_by_label('Your password').fill(OWNER_PW)
+    laptop.get_by_role('button', name='Make my account').click()
+    expect(laptop.get_by_text('You’re signed in as Owner')).to_be_visible(timeout=20000)
+    wait_synced(laptop)
+    people = [p for p in gh.files_at() if p.startswith('people/')]
+    check(len(people) == 1, 'the owner’s own part is a file of its own on GitHub')
+    check(favorites(laptop) == ['s-one', 's-two'], 'the owner still has their favorites')
 
-        print('3. an edit on the phone reaches the laptop')
-        row = phone.locator('.row', has_text='Highway Hymn')
-        row.get_by_role('button', name='Add to favorites').click()
-        wait_synced(phone)
-        sync_now(laptop)
-        check(song_state(laptop, 's-three').get('fav') is True, 'favorite made on the phone shows on the laptop')
+    print('2. the friend’s phone: signs in with the invite, then makes an account')
+    phone.goto(base + '/#/settings')
+    phone.get_by_placeholder('Your TabIt password').fill('wrong password')
+    phone.get_by_role('button', name='Sign in').click()
+    expect(phone.get_by_text('That password didn’t work', exact=False)).to_be_visible(timeout=20000)
+    sign_in(phone, base, '  Banjo River TUESDAY ')
+    phone.goto(base + '/#/')
+    expect(phone.locator('h1.page-title')).to_contain_text('4 songs', timeout=10000)
+    check(phone.get_by_text('Sunrise Waltz').is_visible(), 'the phone has the songbook')
+    check(favorites(phone) == [], 'and none of the owner’s favorites')
+    phone.goto(base + '/#/settings')
+    phone.get_by_label('Your name').fill('Sam')
+    phone.get_by_label('Your password').fill(SAM_PW)
+    phone.get_by_role('button', name='Make my account').click()
+    expect(phone.get_by_text('You’re signed in as Sam')).to_be_visible(timeout=20000)
+    wait_synced(phone)
+    check(len([p for p in gh.files_at() if p.startswith('people/')]) == 2, 'Sam’s part too, no GitHub needed')
+    expect(phone.locator('.set-row', has_text='Owner')).to_be_visible()
+    expect(phone.locator('.set-row', has_text='Sam')).to_contain_text('you')
 
-        print('4. the phone loses GitHub; both edit; it comes back')
-        phone.context.route(api + '/**', lambda r: r.abort())
-        phone.locator('.row', has_text='River Bend').get_by_role('button', name='Remove from favorites').click()
-        for _ in range(60):
-            st = phone.evaluate("async () => { const s = await import('/js/store.js'); return [s.store.sync.state, s.pendingCount()]; }")
-            if st[0] in ('offline', 'error'):
-                break
-            time.sleep(0.25)
-        check(st == ['offline', 1], f'phone keeps the change while GitHub is unreachable ({st})')
-        laptop.goto(base + '/#/song/s-four')
-        laptop.get_by_role('button', name='More').click()
-        laptop.get_by_text('Notes', exact=True).click()
-        laptop.locator('.drawer textarea').fill('Capo 2, slow')
-        laptop.locator('.drawer').get_by_role('button', name='Save').click()
-        wait_synced(laptop)
-        phone.context.unroute(api + '/**')
-        sync_now(phone)
-        wait_synced(phone)
-        sync_now(laptop)
-        check(song_state(phone, 's-four').get('notes') == 'Capo 2, slow', 'the laptop\'s note reached the phone')
-        check(song_state(laptop, 's-two').get('fav') is None, 'the phone\'s offline change reached the laptop')
-        check(song_state(phone, 's-two').get('fav') is None, 'and stayed on the phone')
+    print('3. a favorite on the phone stays Sam’s; a songbook edit reaches the laptop')
+    phone.goto(base + '/#/')
+    phone.locator('.row', has_text='Highway Hymn').get_by_role('button', name='Add to favorites').click()
+    edit(phone, {'t': 'set', 'id': 's-three', 'set': {'capo': 2}})
+    wait_synced(phone)
+    sync_now(laptop)
+    check(song_state(laptop, 's-three').get('capo') == 2, 'the capo set on the phone shows on the laptop')
+    check(song_state(laptop, 's-three').get('fav') is None, 'Sam’s favorite doesn’t')
 
-        print('5. delete on the laptop, undo on the laptop')
-        laptop.goto(base + '/#/')
-        laptop.get_by_text('Porch Light').click()
-        laptop.get_by_role('button', name='More').click()
-        laptop.get_by_text('Delete song').click()
-        laptop.get_by_role('button', name='Undo').click()
-        wait_synced(laptop)
-        sync_now(phone)
-        check(song_state(phone, 's-four') is not None, 'undo brought it back everywhere')
+    print('4. Sam’s iPad: signs in with Sam’s account')
+    sign_in(ipad, base, SAM_PW)
+    check(favorites(ipad) == ['s-three'], 'Sam’s favorites come along, nobody else’s')
+    expect(ipad.get_by_text('You’re signed in as Sam')).to_be_visible()
 
-        commits = [c['message'] for c in gh.commits.values()]
-        check(any('from iPhone' in m for m in commits) and any('from Windows' in m for m in commits), f'commits name the device ({len(commits)} commits)')
+    print('5. the phone loses GitHub; both edit; it comes back')
+    phone.context.route(api + '/**', lambda r: r.abort())
+    phone.locator('.row', has_text='Highway Hymn').get_by_role('button', name='Remove from favorites').click()
+    edit(phone, {'t': 'set', 'id': 's-one', 'set': {'key': 'A'}})
+    st = wait_offline(phone)
+    check(st == ['offline', 2], f'the phone keeps both changes while GitHub is unreachable ({st})')
+    laptop.goto(base + '/#/song/s-four')
+    laptop.get_by_role('button', name='More').click()
+    laptop.get_by_text('Notes', exact=True).click()
+    laptop.locator('.drawer textarea').fill('Capo 2, slow')
+    laptop.locator('.drawer').get_by_role('button', name='Save').click()
+    edit(laptop, {'t': 'set', 'id': 's-two', 'set': {'key': 'D'}})
+    wait_synced(laptop)
+    phone.context.unroute(api + '/**')
+    sync_now(phone)
+    wait_synced(phone)
+    sync_now(laptop)
+    sync_now(ipad)
+    check(song_state(laptop, 's-one').get('key') == 'A' and song_state(phone, 's-two').get('key') == 'D', 'both songbook edits are on both devices')
+    check(favorites(ipad) == [], 'the phone’s offline unfavorite reached Sam’s iPad')
+    check(song_state(laptop, 's-four').get('notes') == 'Capo 2, slow' and song_state(phone, 's-four').get('notes') is None, 'the owner’s note stays the owner’s')
 
-        print('6. the phone signs out with a change that hasn\'t synced, then back in')
-        phone.goto(base + '/#/')
-        phone.context.route(api + '/**', lambda r: r.abort())
-        phone.locator('.row', has_text='Sunrise Waltz').get_by_role('button', name='Remove from favorites').click()
-        for _ in range(60):
-            if phone.evaluate("async () => (await import('/js/store.js')).store.sync.state") == 'offline':
-                break
-            time.sleep(0.25)
-        phone.goto(base + '/#/settings')
-        phone.get_by_role('button', name='Sign out on this device').click()
-        expect(phone.locator('.drawer')).to_contain_text('1 change hasn’t synced yet')
-        phone.locator('.drawer').get_by_role('button', name='Sign out').click()
-        expect(phone.get_by_placeholder('Your TabIt password')).to_be_visible()
-        phone.context.unroute(api + '/**')
-        phone.get_by_placeholder('Your TabIt password').fill('banjo river tuesday')
-        phone.get_by_role('button', name='Sign in').click()
-        expect(phone.get_by_role('heading', name='Passwords')).to_be_visible(timeout=30000)
-        wait_synced(phone)
-        sync_now(laptop)
-        check(song_state(phone, 's-one').get('fav') is None and song_state(laptop, 's-one').get('fav') is None,
-              'the change made before signing out is kept, and reached the laptop')
+    print('6. delete for everyone on the laptop, then undo')
+    laptop.goto(base + '/#/song/s-four')
+    laptop.get_by_role('button', name='More').click()
+    laptop.get_by_text('Delete for everyone').click()
+    laptop.locator('.drawer').get_by_role('button', name='Delete').click()
+    laptop.get_by_role('button', name='Undo').click()
+    wait_synced(laptop)
+    sync_now(phone)
+    check(song_state(phone, 's-four') is not None, 'undo brought it back everywhere')
+    check(song_state(laptop, 's-four').get('notes') == 'Capo 2, slow', 'with the owner’s note')
 
-        print('7. the GitHub key stops working; the laptop replaces it')
-        EXPECTED['401'] = True
-        gh.tokens.discard('tok-owner-123')
-        gh.tokens.add('tok-owner-456')
-        laptop.goto(base + '/#/settings')
-        sync_now(laptop)
-        expect(laptop.get_by_text('GitHub didn’t accept the sync key', exact=False)).to_be_visible(timeout=10000)
-        laptop.get_by_text('Replace the GitHub key').click()
-        laptop.get_by_placeholder('New github_pat_…').fill('tok-owner-456')
-        pw_me = laptop.locator('input[aria-label="Password “Me”"]')
-        pw_me.fill('wrong horse battery')
-        laptop.get_by_role('button', name='Replace key').click()
-        expect(laptop.get_by_text('That isn’t the password for “Me”', exact=False)).to_be_visible(timeout=20000)
-        pw_me.fill('banjo river tuesday')
-        laptop.get_by_role('button', name='Replace key').click()
-        expect(laptop.get_by_text('Key replaced')).to_be_visible(timeout=20000)
-        wait_synced(laptop)
-        check('tok-owner' not in gh.files_at()['access.json'], 'the new key is stored only encrypted')
-        # the phone still has the old key: it signs in again with the same password
-        sync_now(phone)
-        check(phone.evaluate("async () => (await import('/js/store.js')).store.sync.kind") == 'auth', 'the phone notices its key no longer works')
-        phone.goto(base + '/#/settings')
-        phone.get_by_role('button', name='Sign out on this device').click()
-        phone.locator('.drawer').get_by_role('button', name='Sign out').click()
-        phone.get_by_placeholder('Your TabIt password').fill('banjo river tuesday')
-        phone.get_by_role('button', name='Sign in').click()
-        expect(phone.get_by_role('heading', name='Passwords')).to_be_visible(timeout=30000)
-        wait_synced(phone)
-        laptop.evaluate("async () => (await import('/js/store.js')).dispatch({ t: 'set', id: 's-three', set: { notes: 'new key works' } })")
-        wait_synced(laptop)
-        sync_now(phone)
-        check(song_state(phone, 's-three').get('notes') == 'new key works', 'both devices sync with the new key')
+    commits = [c['message'] for c in gh.commits.values()]
+    check(any('from iPhone' in m for m in commits) and any('from Windows' in m for m in commits) and any('personal change' in m for m in commits),
+          f'commits name the device ({len(commits)} commits)')
+    blob = ''.join(gh.files_at().values())
+    check(not any(w in blob for w in ['Capo 2, slow', 'Sunrise', 'Sam’s']), 'still nothing readable on GitHub')
+
+    print('7. the phone signs out with a change that hasn\'t synced, then back in')
+    phone.goto(base + '/#/')
+    phone.context.route(api + '/**', lambda r: r.abort())
+    phone.locator('.row', has_text='Porch Light').get_by_role('button', name='Add to favorites').click()
+    wait_offline(phone)
+    phone.goto(base + '/#/settings')
+    phone.get_by_role('button', name='Sign out on this device').click()
+    expect(phone.locator('.drawer')).to_contain_text('1 change hasn’t synced yet')
+    phone.locator('.drawer').get_by_role('button', name='Sign out').click()
+    expect(phone.get_by_placeholder('Your TabIt password')).to_be_visible()
+    phone.context.unroute(api + '/**')
+    sign_in(phone, base, SAM_PW)
+    sync_now(ipad)
+    fp, fi = favorites(phone), favorites(ipad)
+    check(fp == ['s-four'] and fi == ['s-four'], f'the change made before signing out is kept, and reached the iPad ({fp}, {fi})')
+
+    print('8. the GitHub key stops working; the laptop pastes a new one')
+    EXPECTED['401'] = True
+    gh.tokens.discard('tok-owner-123')
+    gh.tokens.add('tok-owner-456')
+    laptop.goto(base + '/#/settings')
+    sync_now(laptop)
+    expect(laptop.get_by_text('GitHub didn’t accept the sync key', exact=False)).to_be_visible(timeout=10000)
+    laptop.get_by_text('Replace the GitHub key').click()
+    check(laptop.locator('.sub-panel input[type=password]').count() == 1, 'no password to type, only the new key')
+    laptop.get_by_placeholder('New github_pat_…').fill('tok-owner-456')
+    laptop.get_by_role('button', name='Replace key').click()
+    expect(laptop.get_by_text('Key replaced')).to_be_visible(timeout=20000)
+    wait_synced(laptop)
+    check('tok-owner' not in gh.files_at()['access.json'], 'the new key is stored only sealed')
+    # the friend's devices still have the old key: they just carry on
+    edit(phone, {'t': 'set', 'id': 's-three', 'set': {'key': 'Am'}})
+    sync_now(phone)
+    wait_synced(phone)
+    check(phone.evaluate("async () => (await import('/js/store.js')).getAuth().token") == 'tok-owner-456', 'the phone picked up the new key by itself')
+    sync_now(ipad)
+    wait_synced(ipad)
+    sync_now(laptop)
+    check(song_state(laptop, 's-three').get('key') == 'Am' and song_state(ipad, 's-three').get('key') == 'Am', 'and everyone syncs with it')
 
 
 if __name__ == '__main__':

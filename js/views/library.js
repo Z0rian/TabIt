@@ -180,7 +180,8 @@ export function songRow(s, { go, artist = true, onOpen } = {}) {
     h('div', { class: 'row-main' }, h('div', { class: 'row-title' }, s.title), h('div', { class: 'row-sub' }, sub || ' ')),
     h('div', { class: 'row-meta' }, s.key || s.capo ? h('span', { class: 'row-key', title: [s.key && `Key ${s.key}`, s.capo && `capo ${s.capo}`].filter(Boolean).join(', ') }, s.key ? h('span', { class: 'chip key' }, s.key) : null, s.capo ? h('small', {}, `capo ${s.capo}`) : null) : null, fav));
   return swipeToDelete(row, {
-    onDelete: () => {
+    onDelete: async () => {
+      if (signedIn() && !(await confirmSheet(`Delete “${s.title}” for everyone?`, 'It goes from the shared songbook, on everyone’s devices. (To have it out of your way only, unfavorite it.)', { confirm: 'Delete', danger: true }))) return false;
       const undo = undoable({ t: 'del', id: s.id });
       toast(`Deleted “${s.title}”`, { action: 'Undo', onAction: undo });
     },

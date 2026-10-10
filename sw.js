@@ -7,7 +7,7 @@
 // The list below is written by scripts/build.py. Run it before committing.
 
 // BUILD-START
-const BUILD = '4c6928624a';
+const BUILD = '6d69de7895';
 const PRECACHE = [
   './',
   'index.html',
@@ -21,6 +21,7 @@ const PRECACHE = [
   'js/crypto.js',
   'js/db.js',
   'js/diagram.js',
+  'js/doc.js',
   'js/importer.js',
   'js/migrate.js',
   'js/model.js',

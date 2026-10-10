@@ -1,8 +1,11 @@
 // Encryption for sync, all with the browser's own Web Crypto.
 //
-//  - Passwords: each password seals one copy of the sign-in bundle (the GitHub
-//    key + the library key) with AES-GCM under a key stretched from the
-//    password (PBKDF2-SHA256, 600k rounds), the same scheme as the Ranch app.
+//  - Passwords: each password seals what it unlocks with AES-GCM under a key
+//    stretched from the password (PBKDF2-SHA256, 600k rounds), the same scheme
+//    as the Ranch app.
+//  - Each password also has a key pair (ECDH P-256), and the GitHub key is
+//    sealed to its public key: a device that's in can give every password a
+//    new GitHub key without knowing any of them.
 //  - The library itself is gzipped and AES-GCM encrypted with the library key,
 //    because the data repository is public.
 
@@ -21,23 +24,36 @@ export const fromB64 = s => Uint8Array.from(atob(String(s).replace(/\s/g, '')), 
 // Phones like to capitalize the first letter and add a space; those don't count.
 export const normalizePassword = pw => String(pw || '').trim().replace(/\s+/g, ' ').toLowerCase();
 
-async function stretch(password, salt, iterations) {
+async function derive(password, salt, iterations) {
   const base = await crypto.subtle.importKey('raw', enc.encode(normalizePassword(password)), 'PBKDF2', false, ['deriveKey']);
-  return crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt: fromB64(salt), iterations }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
 }
 
-export async function sealWithPassword(payload, password, iterations = ITERATIONS) {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
+// The entries of one sign-in file share a salt, so trying a password on all
+// of them stretches it once. (Kept for half a minute, then forgotten.)
+const stretched = new Map();
+let forget = 0;
+function stretch(password, salt, iterations) {
+  const k = `${iterations}:${salt}:${normalizePassword(password)}`;
+  if (!stretched.has(k)) stretched.set(k, derive(password, salt, iterations).catch(e => { stretched.delete(k); throw e; }));
+  clearTimeout(forget);
+  forget = setTimeout(() => stretched.clear(), 30_000);
+  return stretched.get(k);
+}
+
+export const newSalt = () => toB64(crypto.getRandomValues(new Uint8Array(16)));
+
+export async function sealWithPassword(payload, password, salt = newSalt(), iterations = ITERATIONS) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await stretch(password, salt, iterations);
   const data = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(JSON.stringify(payload)));
-  return { iterations, salt: toB64(salt), iv: toB64(iv), data: toB64(data) };
+  return { iterations, salt, iv: toB64(iv), data: toB64(data) };
 }
 
 // The payload if the password opens this entry, otherwise null.
 export async function openWithPassword(entry, password) {
   try {
-    const key = await stretch(password, fromB64(entry.salt), entry.iterations || ITERATIONS);
+    const key = await stretch(password, entry.salt, entry.iterations || ITERATIONS);
     const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64(entry.iv) }, key, fromB64(entry.data));
     return JSON.parse(dec.decode(plain));
   } catch {
@@ -73,6 +89,43 @@ export async function sealWithToken(payload, token) {
 export async function openWithToken(entry, token) {
   try {
     const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64(entry.iv) }, await tokenKey(token), fromB64(entry.data));
+    return JSON.parse(dec.decode(plain));
+  } catch {
+    return null;
+  }
+}
+
+// ---------- a key pair per password ----------
+
+const ECDH = { name: 'ECDH', namedCurve: 'P-256' };
+const pubOnly = ({ kty, crv, x, y }) => ({ kty, crv, x, y });
+
+// → { pub, priv } as JWK (priv only ever stored sealed with its password, or on a device signed in with it)
+export async function newKeyPair() {
+  const pair = await crypto.subtle.generateKey(ECDH, true, ['deriveBits']);
+  const priv = await crypto.subtle.exportKey('jwk', pair.privateKey);
+  return { pub: pubOnly(await crypto.subtle.exportKey('jwk', pair.publicKey)), priv: { ...pubOnly(priv), d: priv.d } };
+}
+
+async function boxKey(privateKey, publicKey) {
+  const bits = await crypto.subtle.deriveBits({ name: 'ECDH', public: publicKey }, privateKey, 256);
+  const ikm = await crypto.subtle.importKey('raw', bits, 'HKDF', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(32), info: enc.encode('tabit-sealed-v1') }, ikm, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+
+// Sealed so that only the holder of pub's private key opens it.
+export async function sealToKey(payload, pub) {
+  const eph = await crypto.subtle.generateKey(ECDH, true, ['deriveBits']);
+  const key = await boxKey(eph.privateKey, await crypto.subtle.importKey('jwk', pub, ECDH, false, []));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const data = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(JSON.stringify(payload)));
+  return { epk: pubOnly(await crypto.subtle.exportKey('jwk', eph.publicKey)), iv: toB64(iv), data: toB64(data) };
+}
+
+export async function openWithKey(box, priv) {
+  try {
+    const key = await boxKey(await crypto.subtle.importKey('jwk', priv, ECDH, false, ['deriveBits']), await crypto.subtle.importKey('jwk', box.epk, ECDH, false, []));
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromB64(box.iv) }, key, fromB64(box.data));
     return JSON.parse(dec.decode(plain));
   } catch {
     return null;

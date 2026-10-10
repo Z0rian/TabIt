@@ -247,7 +247,10 @@ export function swipeToDelete(row, { label = 'Delete', onDelete }) {
     if (locked === 'x' && -dx > row.offsetWidth * 0.38) {
       row.style.transform = 'translateX(-100%)';
       row.dataset.swiped = '1';
-      setTimeout(() => onDelete(), 180);
+      // (onDelete answering false: it didn't happen, the row comes back)
+      setTimeout(async () => {
+        if ((await onDelete()) === false) { row.style.transform = ''; delete row.dataset.swiped; }
+      }, 180);
     } else {
       row.style.transform = '';
     }

@@ -3,7 +3,7 @@
 
 import { h, icon, iconButton, button, drawer, toast, toggle, confirmSheet, promptSheet, fmtTime, parseTime, fill, initials } from '../ui.js';
 import { coverOf, findCover, NO_COVER } from '../covers.js';
-import { store, subscribe, dispatch, undoable } from '../store.js';
+import { store, subscribe, dispatch, undoable, signedIn } from '../store.js';
 import { newId } from '../model.js';
 import { parseSong, toPlainText } from '../parse.js';
 import { renderSheet, watchSheet } from '../sheet.js';
@@ -421,8 +421,9 @@ export function view(route, { go, back }) {
           } catch { toast('Couldn’t look right now. Are you online?'); }
         }));
     }
-    if (!isPreview) rows.push(menuRow('trash', 'Delete song', '', async () => {
+    if (!isPreview) rows.push(menuRow('trash', signedIn() ? 'Delete for everyone' : 'Delete song', signedIn() ? 'From the shared songbook' : '', async () => {
       close();
+      if (signedIn() && !(await confirmSheet(`Delete “${song.title}” for everyone?`, 'It goes from the shared songbook, on everyone’s devices. (To have it out of your way only, unfavorite it.)', { confirm: 'Delete', danger: true }))) return;
       const undo = undoable({ t: 'del', id });
       toast(`Deleted “${song.title}”`, { action: 'Undo', onAction: () => { undo(); go(`#/song/${id}`); } });
       go('#/');

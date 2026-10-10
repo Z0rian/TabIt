@@ -2,7 +2,7 @@
 
 import { h, icon, button, toast, toggle, seg, confirmSheet, relTime, fmtTime, fill } from '../ui.js';
 import { store, subscribe, signedIn, getAuth, syncNow, signOut, pendingCount, cfg, useMock } from '../store.js';
-import { setupWithKey, signInWithPassword, addPassword, removePassword, listPasswords, tokenUrl, repoUrl, passwordProblem, replaceKey } from '../account.js';
+import { setupWithKey, signInWithPassword, addInvite, makeAccount, useAccount, removePassword, listPasswords, tokenUrl, repoUrl, passwordProblem, replaceKey } from '../account.js';
 import { prefs, applyTheme, autoFontSize } from '../prefs.js';
 import { exportLibrary, addSongs } from '../importer.js';
 import { oldGist, fetchOldGist } from '../migrate.js';
@@ -10,7 +10,8 @@ import { searchUG, PROXY } from '../ug.js';
 import { persistent } from '../db.js';
 import { field } from './common.js';
 
-export const VERSION = '2.0.0';
+export const VERSION = '2.1.0';
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 export function view(route, { go }) {
   const el = h('div', { class: 'page' });
@@ -59,10 +60,10 @@ export function view(route, { go }) {
         // a GitHub key typed here instead of under "Set up sync" works too
         if (looksLikeKey(pw.value)) {
           await setupWithKey(pw.value);
-          toast('Sync is on. Now add a password for your other devices.');
+          toast('The songbook is set up. Now make your account, and an invite for friends.', { ms: 6000 });
         } else {
-          await signInWithPassword(pw.value);
-          toast(`Signed in. ${Object.keys(store.lib.songs).length} songs on this device.`);
+          const a = await signInWithPassword(pw.value);
+          toast(a.person ? `Signed in as ${a.person.label || 'you'}.` : `You’re in the songbook (${Object.keys(store.lib.songs).length} songs). Make your account to keep your favorites on all your devices.`, { ms: 6000 });
         }
         drawSync();
       } catch (ex) {
@@ -72,8 +73,8 @@ export function view(route, { go }) {
       }
     } }, h('div', { style: { display: 'flex', gap: '8px' } }, pw, btn), err);
     return h('section', { class: 'card' },
-      h('h2', {}, icon('cloud', { size: 20 }), ' Sync your songs'),
-      h('p', {}, 'Sign in once on each device (iPhone, iPad, laptop) and your library, favorites and setlists stay the same everywhere. Songs are always on the device too, so they work offline.'),
+      h('h2', {}, icon('cloud', { size: 20 }), ' Shared songbook'),
+      h('p', {}, 'Sign in with your account, or with an invite from a friend, to share one songbook: a song anyone adds is there for everyone. Your favorites, setlists and song settings stay your own. Without signing in, TabIt works on this device alone.'),
       form,
       ownerSetup(),
       useMock ? h('p', { class: 'hint' }, 'Test mode: GitHub is simulated in this browser; any text works as a key.') : null);
@@ -84,13 +85,13 @@ export function view(route, { go }) {
     const err = h('p', { class: 'error', role: 'alert' });
     const btn = button('Set up sync', null, { cls: 'btn', type: 'submit' });
     return h('details', { class: 'sub-panel', open: route.query.has('setup') },
-      h('summary', {}, 'First time? Set up sync (once, on your main device)'),
-      h('p', { class: 'hint' }, `Sync keeps your library on GitHub, encrypted, in a second repository just for it (${cfg.owner}/${cfg.repo}, not TabIt's own), with a key that can only reach that one. Signed in to GitHub:`),
+      h('summary', {}, 'Starting a songbook of your own? Set it up (needs GitHub, once)'),
+      h('p', { class: 'hint' }, `The songbook is kept on GitHub, encrypted, in a second repository just for it (${cfg.owner}/${cfg.repo}, not TabIt's own), with a key that can only reach that one. Signed in to GitHub:`),
       h('ol', { class: 'steps' },
         h('li', {}, 'Make a new, empty repository for your library (not a copy of TabIt: it starts empty and TabIt fills it). Open ', h('a', { href: repoUrl(), target: '_blank', rel: 'noopener' }, 'this pre-filled page'), ` (name `, h('b', {}, cfg.repo), ', ', h('b', {}, 'Public'), ': everything in it is encrypted) and press ', h('b', {}, 'Create repository'), '.'),
         h('li', {}, 'Make the key: open ', h('a', { href: tokenUrl(), target: '_blank', rel: 'noopener' }, 'this pre-filled key page'), '. Under ', h('b', {}, 'Repository access'), ' choose ', h('b', {}, 'Only select repositories'), ` → ${cfg.repo}, and check that `, h('b', {}, 'Contents'), ' is ', h('b', {}, 'Read and write'), '.'),
         h('li', {}, 'Press ', h('b', {}, 'Generate token'), ', copy it, paste it here.'),
-        h('li', {}, 'Then add a password. Every other device signs in with just that password.')),
+        h('li', {}, 'Then make your account, and an invite password for friends. Nobody else needs GitHub.')),
       h('form', { onSubmit: async e => {
         e.preventDefault();
         btn.disabled = true;
@@ -98,7 +99,7 @@ export function view(route, { go }) {
         err.textContent = '';
         try {
           await setupWithKey(key.value);
-          toast('Sync is on. Now add a password for your other devices.');
+          toast('The songbook is set up. Now make your account, and an invite for friends.', { ms: 6000 });
           drawSync();
         } catch (ex) {
           showError(err, ex);
@@ -111,51 +112,100 @@ export function view(route, { go }) {
   function syncedCard() {
     const a = getAuth();
     const s = store.sync;
-    const status = s.state === 'saving' ? 'Syncing…' : s.state === 'pending' ? `${pendingCount()} change${pendingCount() === 1 ? '' : 's'} waiting to sync` : s.state === 'offline' ? s.message : s.state === 'error' ? s.message : s.at ? `Synced ${relTime(s.at)}` : 'Synced';
+    const n = pendingCount();
+    const status = s.state === 'saving' ? 'Syncing…' : s.state === 'pending' ? `${n} change${n === 1 ? '' : 's'} waiting to sync` : s.state === 'offline' ? s.message : s.state === 'error' ? s.message : s.at ? `Synced ${relTime(s.at)}` : 'Synced';
     const dot = s.state === 'error' ? 'err' : s.state === 'saving' || s.state === 'pending' ? 'busy' : s.state === 'offline' ? '' : 'ok';
-    const passwords = h('div', { class: 'set-list', style: { marginTop: '8px' } }, h('div', { class: 'set-row' }, h('span', { class: 'spinner' }), h('span', { class: 'lbl' }, 'Loading passwords…')));
-    const loadPw = (fresh = false) => passwordList(fresh).then(list => {
-      fill(passwords, ...(list.length ? list.map(p => h('div', { class: 'set-row' },
-        icon('key'),
-        h('span', { class: 'lbl' }, h('b', {}, p.label), h('small', {}, `Added ${p.added}${p.device ? ` on ${p.device}` : ''}`)),
-        button('Remove', async () => {
-          if (!(await confirmSheet('Remove this password?', 'Devices already signed in stay signed in. New devices can’t use it anymore.', { confirm: 'Remove', danger: true }))) return;
-          try { await removePassword(p.id); toast('Password removed'); loadPw(true); } catch (e) { toast(e.message); }
-        }, { cls: 'btn-small btn-ghost' }))) : [h('div', { class: 'set-row' }, h('span', { class: 'lbl' }, h('b', {}, 'No passwords yet'), h('small', {}, 'Add one so your other devices can sign in.')))]));
-    }).catch(e => fill(passwords, h('div', { class: 'set-row' }, h('span', { class: 'lbl error' }, e.message))));
-    loadPw();
-    const pwIn = h('input', { class: 'input', type: 'password', autocomplete: 'new-password', placeholder: 'e.g. banjo river tuesday', 'aria-label': 'New password' });
-    const labelIn = h('input', { class: 'input', placeholder: 'Label (not secret), e.g. Me', 'aria-label': 'Label' });
-    const pwErr = h('p', { class: 'error', role: 'alert' });
-    const addForm = h('form', { onSubmit: async e => {
-      e.preventDefault();
-      const problem = passwordProblem(pwIn.value);
-      if (problem) { pwErr.textContent = problem; return; }
-      pwErr.textContent = 'Saving…';
-      try {
-        await addPassword(pwIn.value, labelIn.value);
-        pwIn.value = labelIn.value = '';
-        pwErr.textContent = '';
-        toast('Password added. Use it to sign in on your other devices.');
-        loadPw(true);
-      } catch (ex) { pwErr.textContent = ex.message; }
-    } }, h('div', { class: 'field-row' }, field('New password', pwIn), field('Label', labelIn)), pwErr, button('Add password', null, { type: 'submit', cls: 'btn-small' }));
+    const people = h('div', { class: 'set-list', style: { marginTop: '8px' } }, h('div', { class: 'set-row' }, h('span', { class: 'spinner' }), h('span', { class: 'lbl' }, 'Loading…')));
+    const invites = h('div', { class: 'set-list', style: { marginTop: '8px' } });
+    const row = (p, what) => h('div', { class: 'set-row' },
+      icon(p.kind === 'person' ? 'user' : 'key'),
+      h('span', { class: 'lbl' }, h('b', {}, p.label), h('small', {}, `${what} ${p.added}${p.device ? ` on ${p.device}` : ''}`)),
+      p.kind === 'person' && a.person && p.id === a.entry ? h('small', {}, 'you') : button('Remove', async () => {
+        const ok = p.kind === 'person'
+          ? await confirmSheet(`Remove ${p.label}’s account?`, 'No device can sign in to it any more. Devices already signed in stay in until the GitHub key is replaced. Their favorites and setlists aren’t deleted.', { confirm: 'Remove', danger: true })
+          : await confirmSheet('Remove this invite?', 'Nobody new can join with it. Devices already signed in with it stay in until the GitHub key is replaced.', { confirm: 'Remove', danger: true });
+        if (!ok) return;
+        try { await removePassword(p.id); toast('Removed'); load(true); } catch (e) { toast(e.message); }
+      }, { cls: 'btn-small btn-ghost' }));
+    const load = (fresh = false) => passwordList(fresh).then(list => {
+      const accounts = list.filter(p => p.kind === 'person');
+      const inv = list.filter(p => p.kind !== 'person');
+      fill(people, ...(accounts.length ? accounts.map(p => row(p, 'Since')) : [h('div', { class: 'set-row' }, h('span', { class: 'lbl' }, h('b', {}, 'No accounts yet'), h('small', {}, 'Everyone makes their own, under “Your account”.')))]));
+      fill(invites, ...(inv.length ? inv.map(p => row(p, 'Made')) : [h('div', { class: 'set-row' }, h('span', { class: 'lbl' }, h('b', {}, 'No invites'), h('small', {}, 'Make one to let a friend in.')))]));
+    }).catch(e => fill(people, h('div', { class: 'set-row' }, h('span', { class: 'lbl error' }, e.message))));
+    load();
 
+    // a little form: its fields, its button, what it does
+    const form = (fields, label, act) => {
+      const err = h('p', { class: 'error', role: 'alert' });
+      return h('form', { onSubmit: async e => {
+        e.preventDefault();
+        err.textContent = 'Saving…';
+        try {
+          await act();
+          for (const f of fields) f.value = '';
+          err.textContent = '';
+        } catch (ex) { showError(err, ex); }
+      } }, h('div', { class: 'field-row' }, ...fields.map(f => field(f.getAttribute('aria-label'), f))), err, button(label, null, { type: 'submit', cls: 'btn-small' }));
+    };
+    const check = pw => {
+      const problem = passwordProblem(pw);
+      if (problem) throw Object.assign(new Error(problem), { kind: 'input' });
+    };
+
+    let account;
+    if (a.person) {
+      account = h('p', { class: 'hint' }, `You’re signed in as ${a.person.label || 'yourself'}. Your favorites, setlists and song settings sync to all your devices, locked with your own password: nobody else in the songbook can read them.`);
+    } else {
+      const nameIn = h('input', { class: 'input', placeholder: 'Shown to the others', 'aria-label': 'Your name', autocomplete: 'nickname' });
+      const pwIn = h('input', { class: 'input', type: 'password', autocomplete: 'new-password', placeholder: 'e.g. banjo river tuesday', 'aria-label': 'Your password' });
+      const mineIn = h('input', { class: 'input', type: 'password', autocomplete: 'current-password', placeholder: 'Your account’s password', 'aria-label': 'Account password' });
+      account = h('div', {},
+        h('p', { class: 'hint' }, 'Your favorites, setlists and song settings are only on this device. Make your own account to keep them on all your devices: no GitHub needed, and you sign in anywhere with its password.'),
+        form([nameIn, pwIn], 'Make my account', async () => {
+          check(pwIn.value);
+          await makeAccount(pwIn.value, nameIn.value);
+          pwCache = null;
+          toast('Your account is made. Sign in with its password on your other devices.', { ms: 6000 });
+          drawSync();
+        }),
+        h('details', { class: 'sub-panel' }, h('summary', {}, 'Made your account on another device? Use it here'),
+          h('p', { class: 'hint' }, 'What this device has (favorites, setlists…) is added to it.'),
+          form([mineIn], 'Use my account', async () => {
+            const me = await useAccount(mineIn.value);
+            toast(`Signed in as ${me.person.label || 'you'}.`);
+            drawSync();
+          })));
+    }
+
+    const invIn = h('input', { class: 'input', type: 'password', autocomplete: 'new-password', placeholder: 'e.g. campfire songs 2026', 'aria-label': 'Invite password' });
+    const invLabel = h('input', { class: 'input', placeholder: 'Not secret, e.g. Friends', 'aria-label': 'Label' });
+    const inviteForm = form([invIn, invLabel], 'Make an invite', async () => {
+      check(invIn.value);
+      await addInvite(invIn.value, invLabel.value);
+      toast('Invite made. A friend signs in with it at z0rian.github.io/TabIt, then makes their own account.', { ms: 7000 });
+      load(true);
+    });
+
+    const heading = text => h('h3', { style: { margin: '18px 0 0', fontSize: '15px' } }, text);
     return h('section', { class: 'card' },
-      h('h2', {}, icon('cloud', { size: 20 }), ' Sync'),
+      h('h2', {}, icon('cloud', { size: 20 }), ' Shared songbook'),
       h('p', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, h('span', { class: `status-dot ${dot}` }), status),
-      h('p', { class: 'hint' }, `${Object.keys(store.lib.songs).length} songs. Signed in ${a.via === 'key' ? `with the GitHub key${a.login ? ` (${a.login})` : ''}` : `with a password${a.label ? ` (${a.label})` : ''}`}${a.since ? `, ${relTime(a.since)}` : ''}.`),
+      h('p', { class: 'hint' }, `${plural(Object.keys(store.lib.songs).length, 'song')}, shared by everyone signed in. This device signed in ${a.via === 'key' ? `with the GitHub key${a.login ? ` (${a.login})` : ''}` : a.person ? `as ${a.person.label || 'you'}` : `with an invite${a.label ? ` (${a.label})` : ''}`}${a.since ? `, ${relTime(a.since)}` : ''}.`),
       h('div', { class: 'btn-row' },
         button('Sync now', () => syncNow(), { cls: 'btn-small', iconName: 'sync' }),
         button('Sign out on this device', async () => {
-          const n = pendingCount();
-          const ok = await confirmSheet('Sign out on this device?', `${n ? `${n} change${n === 1 ? ' hasn’t' : 's haven’t'} synced yet. ` : ''}Your songs stay on this device but stop syncing; when you sign in again, what you changed here in the meantime is added to your library. Other devices aren’t affected.`, { confirm: 'Sign out', danger: n > 0 });
+          const ok = await confirmSheet('Sign out on this device?', `${n ? `${n} change${n === 1 ? ' hasn’t' : 's haven’t'} synced yet. ` : ''}The songs stay on this device but stop syncing; sign in again and what you changed here in the meantime is added. Nobody else is affected.`, { confirm: 'Sign out', danger: n > 0 });
           if (ok) { signOut({ keepSongs: true }); drawSync(); }
         }, { cls: 'btn-small btn-ghost' })),
-      h('h3', { style: { margin: '18px 0 0', fontSize: '15px' } }, 'Passwords'),
-      h('p', { class: 'hint' }, 'Any of these signs a device in. Capitals and spaces don’t matter.'),
-      passwords,
-      h('div', { style: { marginTop: '12px' } }, addForm),
+      heading('Your account'),
+      account,
+      heading('Invites'),
+      h('p', { class: 'hint' }, 'An invite password lets a friend in: they sign in with it, then make their own account. Capitals and spaces don’t matter.'),
+      invites,
+      h('div', { style: { marginTop: '12px' } }, inviteForm),
+      heading('People'),
+      people,
       a.via === 'key' || s.kind === 'auth' ? replaceKeyPanel() : null);
   }
 
@@ -166,12 +216,15 @@ export function view(route, { go }) {
     const boxes = h('div', {}, h('p', { class: 'hint' }, 'Loading your passwords…'));
     let inputs = [];
     passwordList().then(list => {
-      inputs = list.map(p => ({ id: p.id, input: h('input', { class: 'input', type: 'password', autocomplete: 'off', placeholder: 'Type it again to keep it', 'aria-label': `Password “${p.label}”` }) }));
-      if (!inputs.length) inputs = [{ id: null, input: h('input', { class: 'input', type: 'password', autocomplete: 'new-password', placeholder: 'A password for signing in', 'aria-label': 'Password' }) }];
-      fill(boxes, ...inputs.map((x, i) => field(list[i] ? `Password “${list[i].label}”` : 'A password for your devices', x.input)));
+      // (passwords from before TabIt 2.1 can only be handed the new key typed again)
+      const old = list.filter(p => p.old);
+      inputs = old.map(p => ({ id: p.id, input: h('input', { class: 'input', type: 'password', autocomplete: 'off', placeholder: 'Type it again to keep it', 'aria-label': `Password “${p.label}”` }) }));
+      fill(boxes, ...(old.length ? [h('p', { class: 'hint' }, old.length === 1 ? 'This password is from an older TabIt: type it again to keep it (left empty, it stops working).' : 'These passwords are from an older TabIt: type each one to keep (any left empty stop working).')] : []),
+        ...inputs.map((x, i) => field(`${old[i].kind === 'person' ? 'Account' : 'Invite'} “${old[i].label}”`, x.input)));
     }).catch(e => fill(boxes, h('p', { class: 'error' }, e.message)));
     return h('details', { class: 'sub-panel' }, h('summary', {}, 'Replace the GitHub key'),
-      h('p', { class: 'hint' }, 'If the key expired or you deleted it on GitHub. Make a new one the same way (step 2 above), then type each password you want to keep: they’re locked again with the new key. Any left empty stop working.'),
+      getAuth()?.via !== 'key' ? h('p', { class: 'hint' }, 'This needs the songbook owner’s GitHub. Once they’ve replaced the key, this device picks up the new one by itself.') : null,
+      h('p', { class: 'hint' }, 'If the key expired or was deleted on GitHub. Make a new one on ', h('a', { href: tokenUrl(), target: '_blank', rel: 'noopener' }, 'this pre-filled key page'), ` (Repository access: only ${cfg.repo}; Contents: Read and write) and paste it here. Every invite and account gets it, and devices that are signed in pick it up by themselves.`),
       h('form', { onSubmit: async e => {
         e.preventDefault();
         const typed = inputs.map(x => ({ id: x.id, password: x.input.value }));

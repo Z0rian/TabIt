@@ -46,6 +46,13 @@ class Switchable:
                 self.send_header('Cache-Control', 'max-age=0, must-revalidate')
                 http.server.SimpleHTTPRequestHandler.end_headers(self)
 
+            def send_head(self):
+                # GitHub Pages revalidates by content; going by file times would
+                # answer "not modified" for a deploy whose files are older
+                # than the checkout it replaces
+                del self.headers['If-Modified-Since']
+                return super().send_head()
+
         self.httpd = serve.Server(('127.0.0.1', self.port), H)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.base = f'http://localhost:{self.port}'

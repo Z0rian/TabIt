@@ -690,6 +690,8 @@ button.chip-btn:active { transform: scale(0.97); }
 .sub-panel { margin: 14px 0 0; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); }
 .sub-panel > summary { cursor: pointer; font-weight: 600; color: var(--ink-2); }
 .sub-panel[open] > summary { margin-bottom: 8px; }
+/* (a plain button would be the panel's own colour) */
+.sub-panel .btn:not(.btn-primary):not(.btn-danger):not(.btn-ghost) { background: var(--surface); border: 1px solid var(--line); }
 .steps { margin: 8px 0 12px; padding-left: 20px; color: var(--ink-2); }
 .steps li { margin: 4px 0; }
 .more-fields { margin: 0 0 14px; }
