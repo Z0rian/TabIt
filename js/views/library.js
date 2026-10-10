@@ -29,7 +29,8 @@ export function view(route, { go }) {
 
   const input = h('input', {
     class: 'input', type: 'search', placeholder: 'Search your songs or Ultimate Guitar', value: q, enterkeyhint: 'search',
-    'aria-label': 'Search', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false',
+    // (song titles aren't words to correct)
+    'aria-label': 'Search', autocomplete: 'off', autocorrect: 'off', autocapitalize: 'off', spellcheck: 'false',
   });
   const clear = iconButton('close', 'Clear search', () => { input.value = ''; q = ''; session.query = ''; session.ug = null; draw(); input.focus(); }, { cls: 'clear' });
   const search = h('div', { class: 'search' }, icon('search'), input, clear);

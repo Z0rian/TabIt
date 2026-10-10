@@ -6,6 +6,7 @@ import { prefs, applyTheme } from './prefs.js';
 import { oldLibrary, markMigrated, oldTheme, shrinkCovers } from './migrate.js';
 import { requestPersist } from './db.js';
 import { startCovers } from './covers.js';
+import { hideSplash, stopSplash } from './splash.js';
 
 const VIEWS = {
   library: () => import('./views/library.js'),
@@ -105,9 +106,10 @@ async function boot() {
   markMigrated();
   addEventListener('tabit-storage-error', () => toast('This device’s storage is full or not working, so your latest changes may not be kept after closing TabIt. Free up some space, or export a backup in Settings.', { ms: 12000 }));
   appEl.append(tabbar, viewEl);
-  document.getElementById('root').replaceWith(appEl);
+  document.body.prepend(appEl); // under the loading screen
   addEventListener('hashchange', () => { track(); route(); });
   await route();
+  hideSplash();
   store.maybePull(0);
   setInterval(() => { if (document.visibilityState === 'visible') store.maybePull(5 * 60_000); }, 60_000);
   requestPersist();
@@ -115,6 +117,10 @@ async function boot() {
   setTimeout(() => shrinkCovers(Object.values(store.store.lib.songs), op => store.dispatch(op, { lazy: true })), 3000);
   startCovers();
 }
+
+// Safari zooms the page on a pinch even when told not to; these are its own
+// gesture events (the song screen does its own pinch, with touch events).
+for (const type of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(type, e => e.preventDefault(), { passive: false });
 
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
@@ -155,5 +161,6 @@ function registerServiceWorker() {
 
 boot().catch(e => {
   console.error(e);
+  stopSplash();
   document.getElementById('root')?.replaceChildren(h('div', { class: 'empty' }, h('h3', {}, 'TabIt couldn’t start'), h('p', {}, String(e?.message || e))));
 });

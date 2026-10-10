@@ -35,13 +35,14 @@ export function view(route, { go, back }) {
   const vs = () => song.view || {};
   // applied here at once, so quick taps (transpose, transpose) add up even
   // before the store has passed the change back
-  const setView = set => {
+  // (draw: false when the screen already shows it, like a pinched text size)
+  const setView = (set, { draw = true } = {}) => {
     const view = { ...vs(), ...set };
     for (const k of Object.keys(view)) if (view[k] === null || view[k] === undefined) delete view[k];
     song = { ...song, view };
-    if (isPreview) { session.preview = song; redraw(); return; }
-    dispatch({ t: 'view', id, set });
-    redraw();
+    if (isPreview) session.preview = song;
+    else dispatch({ t: 'view', id, set });
+    if (draw) redraw();
   };
 
   let doc = parseSong(song.content);
@@ -555,31 +556,54 @@ export function view(route, { go, back }) {
   }
 
   // ---------- pinch to zoom ----------
+  // The text itself gets bigger or smaller as you pinch, and the lines wrap to
+  // the screen as it does (nothing runs off the edge); the line between your
+  // fingers stays where it is. Saved with the song when you let go.
   let pinch = null;
   const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  const midY = t => (t[0].clientY + t[1].clientY) / 2;
   sheetHolder.addEventListener('touchstart', e => {
     if (e.touches.length !== 2) return;
-    pinch = { d0: dist(e.touches), fs: vs().fs || fontSize(), cy: (e.touches[0].clientY + e.touches[1].clientY) / 2, scale: 1 };
+    const fs = vs().fs || fontSize();
+    pinch = { d0: dist(e.touches), fs0: fs, fs, cy: midY(e.touches), frame: 0 };
   }, { passive: true });
   sheetHolder.addEventListener('touchmove', e => {
     if (!pinch || e.touches.length !== 2) return;
     e.preventDefault();
-    pinch.scale = Math.max(0.5, Math.min(2.4, dist(e.touches) / pinch.d0));
-    sheet.style.transformOrigin = `50% ${pinch.cy - sheet.getBoundingClientRect().top}px`;
-    sheet.style.transform = `scale(${pinch.scale})`;
+    pinch.cy = midY(e.touches);
+    const fs = Math.max(12, Math.min(40, Math.round(pinch.fs0 * dist(e.touches) / pinch.d0)));
+    if (fs === pinch.fs) return;
+    pinch.fs = fs;
+    pinch.frame ||= requestAnimationFrame(() => {
+      if (!pinch) return;
+      pinch.frame = 0;
+      sizeTo(pinch.fs, pinch.cy);
+    });
   }, { passive: false });
+  // the text at this size now, keeping the line at height y on the screen in place
+  function sizeTo(fs, y) {
+    const el = document.elementFromPoint(innerWidth / 2, y)?.closest('.sheet > .blk');
+    const before = el?.getBoundingClientRect();
+    root.style.setProperty('--fs', fs + 'px');
+    if (el && before) {
+      const after = el.getBoundingClientRect();
+      const at = before.height ? (y - before.top) / before.height : 0;
+      scrollBy(0, after.top + at * after.height - y);
+    }
+    scroller?.invalidate();
+  }
   const endPinch = () => {
     if (!pinch) return;
-    const p = pinch;
+    const { fs, fs0, frame } = pinch;
     pinch = null;
-    sheet.style.transform = '';
-    const fs = Math.max(12, Math.min(40, Math.round(p.fs * p.scale)));
-    if (fs !== (vs().fs || fontSize())) setView({ fs });
+    if (frame) cancelAnimationFrame(frame);
+    if (fs !== fs0) {
+      sizeTo(fs, innerHeight / 2);
+      setView({ fs }, { draw: false });
+    }
   };
   sheetHolder.addEventListener('touchend', endPinch);
   sheetHolder.addEventListener('touchcancel', endPinch);
-  const noZoom = e => e.preventDefault(); // Safari's own page zoom
-  document.addEventListener('gesturestart', noZoom);
 
   // ctrl + wheel / ctrl + plus on a computer changes the text size too
   const onWheel = e => {
@@ -648,7 +672,6 @@ export function view(route, { go, back }) {
       removeEventListener('keydown', onKey);
       removeEventListener('wheel', onWheel);
       removeEventListener('scroll', onScroll);
-      document.removeEventListener('gesturestart', noZoom);
     },
   };
 }

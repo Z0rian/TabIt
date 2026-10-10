@@ -204,6 +204,7 @@ export function view(route, { go }) {
         prefs.get('fontSize') ? button('Auto', () => { prefs.set('fontSize', 0); draw(); }, { cls: 'btn-small btn-ghost' }) : null),
       row('Chord diagrams above songs', '', toggle(prefs.get('diagrams'), v => prefs.set('diagrams', v), 'Chord diagrams')),
       row('Left-handed diagrams', 'Mirror the chord boxes', toggle(prefs.get('leftHanded'), v => prefs.set('leftHanded', v), 'Left-handed')),
+      row('Loading screen', 'A guitar pun while TabIt starts', toggle(prefs.get('splash'), v => prefs.set('splash', v), 'Loading screen')),
     ]);
   }
 

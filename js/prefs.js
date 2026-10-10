@@ -17,6 +17,7 @@ export const DEFAULTS = {
   tuning: 'standard',
   followVideo: true,
   defaultLength: 0, // seconds; 0 = estimate from the song
+  splash: true, // a pun on the loading screen
 };
 
 let cache = null;

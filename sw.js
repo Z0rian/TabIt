@@ -7,7 +7,7 @@
 // The list below is written by scripts/build.py. Run it before committing.
 
 // BUILD-START
-const BUILD = 'c18dc916e5';
+const BUILD = 'c19c9576a3';
 const PRECACHE = [
   './',
   'index.html',
@@ -27,9 +27,11 @@ const PRECACHE = [
   'js/parse.js',
   'js/pitch.js',
   'js/prefs.js',
+  'js/puns.js',
   'js/remote.js',
   'js/session.js',
   'js/sheet.js',
+  'js/splash.js',
   'js/store.js',
   'js/strum.js',
   'js/theory.js',

@@ -145,7 +145,8 @@
 }
 
 *, *::before, *::after { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; height: 100%; }
+/* an app, not a page: no pinch or double-tap zoom (a song's text size is pinched instead) */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; height: 100%; touch-action: pan-x pan-y; }
 body {
   margin: 0;
   min-height: 100%;
@@ -705,7 +706,32 @@ svg.danger { color: var(--danger); }
 .import-log .bad { color: var(--danger); }
 .kbd { font: 600 12px/1 var(--font-mono); padding: 3px 6px; border-radius: 5px; background: var(--surface-2); color: var(--ink-2); }
 .offline-badge { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-3); font-size: 13px; }
-.splash { min-height: 100dvh; display: grid; place-items: center; }
+/* the loading screen (in index.html, so it's there before any code loads) */
+.splash { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; background: var(--bg); transition: opacity .3s ease; }
+.splash.out { opacity: 0; pointer-events: none; }
+.splash-in { display: grid; justify-items: center; gap: 18px; padding: 24px; text-align: center; }
+.splash-logo { width: 76px; height: 76px; border-radius: 19px; box-shadow: var(--shadow); }
+.splash-strings { width: 132px; height: 62px; overflow: visible; }
+.splash-strings line { stroke: var(--ink-3); stroke-linecap: round; animation: string-ring 1.4s infinite; animation-delay: calc(var(--i) * 72ms + 110ms); }
+.splash-strings .pick { fill: var(--accent); transform-box: fill-box; transform-origin: center; animation: pick-strum 1.4s infinite cubic-bezier(.45, 0, .55, 1); }
+.splash.stopped * { animation: none; }
+.splash-pun { margin: 0; min-height: 2.8em; max-width: 19em; font: 600 17px/1.4 var(--font-ui); color: var(--ink-2); opacity: 0; }
+.splash-pun.in { animation: pun-in .35s ease forwards; }
+@keyframes pun-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes pick-strum {
+  0% { transform: translate(60px, -10px) rotate(-14deg); opacity: 0; }
+  6% { opacity: 1; }
+  38% { transform: translate(72px, 64px) rotate(10deg); opacity: 1; }
+  46%, 100% { transform: translate(74px, 70px) rotate(12deg); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .splash-strings line, .splash-strings .pick { animation: none !important; }
+  .splash-strings .pick { transform: translate(66px, 31px) rotate(-10deg); }
+}
+@keyframes string-ring {
+  0% { transform: none; } 3% { transform: translateY(-1.8px); } 6% { transform: translateY(1.5px); } 9% { transform: translateY(-1.1px); }
+  12% { transform: translateY(.7px); } 15% { transform: translateY(-.4px); } 18%, 100% { transform: none; }
+}
 .editor-area { font: 14px/1.5 var(--font-mono); min-height: 52dvh; white-space: pre; overflow-wrap: normal; overflow-x: auto; tab-size: 8; }
 
 @media (prefers-reduced-motion: reduce) {
