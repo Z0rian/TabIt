@@ -46,6 +46,16 @@ READ = """() => {
 }"""
 
 
+# a line's place on screen, and the sheet's sub-pixel shift, every frame for 2 s
+FRAMES = r"""() => new Promise(done => {
+  const sheet = document.querySelector('.sheet');
+  const el = sheet.querySelectorAll('.pair')[6]; const out = [];
+  const shiftOf = () => { const m = /translate3d\(0px, (-?[\d.]+)px/.exec(sheet.style.transform); return m ? -parseFloat(m[1]) : 0; };
+  const step = () => { out.push({ top: el.getBoundingClientRect().top, shift: shiftOf(), scroll: scrollY, dpr: devicePixelRatio }); if (out.length < 120) requestAnimationFrame(step); else done(out); };
+  requestAnimationFrame(step);
+})"""
+
+
 def check(cond, msg):
     if not cond:
         raise AssertionError(msg)
@@ -138,6 +148,27 @@ def run(engine, device, base):
         low, high = speeds[1], speeds[-2]
         check(low > 0 and high / low < 1.3, f'the same speed past titles, blank lines, chords and tab ({low:.0f}–{high:.0f} px/s)')
         page.locator('.deck .play').click()
+
+        print(f'[{device}] slowly: it glides instead of jumping a pixel at a time')
+        page.evaluate("async () => (await import('/js/store.js')).dispatch({ t: 'set', id: 's-mixed', set: { duration: 200 } })")
+        page.goto(base + '/#/song/s-mixed?slow')
+        page.wait_for_selector('.sheet .pair')
+        page.locator('.deck .play').click()
+        time.sleep(3)
+        f = page.evaluate(FRAMES)
+        moves = [a['top'] - b_['top'] for a, b_ in zip(f, f[1:])]
+        still = sum(1 for m in moves if abs(m) < 0.01) / len(moves)
+        dpr = f[0]['dpr']
+        # (scroll and shift together land on whole screen dots)
+        sharp = all(abs((x['scroll'] + x['shift']) * dpr - round((x['scroll'] + x['shift']) * dpr)) < 0.01 for x in f)
+        check(sharp, f'the text only ever sits on whole screen dots, so it stays sharp (devicePixelRatio {dpr:g})')
+        if dpr >= 2:
+            check(still < 0.4, f'the text moves on {1 - still:.0%} of frames at {sum(moves) / len(moves):.2f} px a frame, in {1 / dpr:.2f} px steps')
+        else:
+            check(max(abs(m) for m in moves) <= 1.01, 'a 1x screen: one dot at a time, the finest a sharp text can move')
+        # (force: Playwright's WebKit counts the page scrolling under the fixed
+        # button as the button moving)
+        page.locator('.deck .play').click(force=True)
         if errors:
             raise AssertionError(errors)
         b.close()

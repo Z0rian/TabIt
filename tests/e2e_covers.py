@@ -84,10 +84,10 @@ def main():
             got = wait_for(page, lambda v: v.get('s-ug') and v.get('s-it'))
             check(got['s-ug'] == UG_COVER, 'a song from Ultimate Guitar gets its cover from there')
             check(got['s-it'] == 'https://covers.test/it/porch/300x300bb.png', 'another gets the right artist’s cover from iTunes (not the karaoke one), at 300 px')
-            time.sleep(2.5)
+            # (the third song's turn comes a couple of seconds later)
+            page.wait_for_function("'s-none' in JSON.parse(localStorage.getItem('tabit.covers.tried') || '{}')", timeout=20000)
             check(page.evaluate(COVERS)['s-none'] is None, 'a song with no cover anywhere stays without one')
-            tried = page.evaluate("JSON.parse(localStorage.getItem('tabit.covers.tried') || '{}')")
-            check('s-none' in tried, 'and isn’t looked up again for a while')
+            check(True, 'and isn’t looked up again for a while')
             expect(page.locator('.row-art img')).to_have_count(2, timeout=5000)
             check(page.locator('.row', has_text='Mystery Tune').locator('.row-art').inner_text().strip() == 'NK', 'the library shows the covers, and initials where there’s none')
 

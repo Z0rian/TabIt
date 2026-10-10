@@ -1,2 +1,2 @@
 // Written by scripts/build.py.
-export const BUILD = '52d2255334';
+export const BUILD = '4c6928624a';

@@ -112,6 +112,7 @@ export class AutoScroll {
     if (!this.playing) return;
     this.playing = false;
     cancelAnimationFrame(this.raf);
+    this.unshift();
     this.onChange(this.state());
   }
 
@@ -124,6 +125,7 @@ export class AutoScroll {
 
   restart() {
     this.t = 0;
+    this.unshift();
     scrollTo({ top: 0 });
     this.pos = 0;
     this.onChange(this.state());
@@ -142,10 +144,10 @@ export class AutoScroll {
       // glide into place instead of jumping (e.g. right after pressing play)
       const gap = want - this.pos;
       this.pos += Math.abs(gap) > 2 ? gap * Math.min(1, dt * 4) : gap;
-      this.lastSet = Math.round(this.pos);
-      if (Math.abs(scrollY - this.pos) >= 0.5) scrollTo(0, this.pos);
+      this.place(this.pos);
       if (this.t >= this.duration() && scrollY >= document.documentElement.scrollHeight - innerHeight - 2) {
         this.playing = false;
+        this.unshift();
         this.onChange({ ...this.state(), ended: true });
         return;
       }
@@ -157,9 +159,37 @@ export class AutoScroll {
     this.raf = requestAnimationFrame(this.frame);
   }
 
+  // The page itself only scrolls by whole pixels (on a phone, a jump of two
+  // or three of the screen's dots, which reads as a stutter at reading speed).
+  // The sheet makes up the rest by shifting a fraction of a pixel, in whole
+  // dots, so the text glides and stays sharp.
+  place(pos) {
+    const dots = devicePixelRatio || 1;
+    const max = Math.max(0, document.documentElement.scrollHeight - innerHeight);
+    const at = Math.min(max, Math.round(pos * dots) / dots);
+    const whole = Math.floor(at + 1e-6);
+    if (Math.abs(scrollY - whole) > 0.01) scrollTo(0, whole);
+    this.lastSet = whole;
+    const el = this.sheet;
+    if (this.shifted !== el) {
+      this.unshift();
+      this.shifted = el;
+      el.classList.add('autoscrolling'); // its own layer while it moves
+    }
+    el.style.transform = `translate3d(0, ${-(at - whole).toFixed(3)}px, 0)`;
+  }
+
+  unshift() {
+    if (!this.shifted) return;
+    this.shifted.style.transform = '';
+    this.shifted.classList.remove('autoscrolling');
+    this.shifted = null;
+  }
+
   // A finger or wheel takes over; when it lets go, carry on from there.
   onUser() {
     if (!this.playing) return;
+    this.unshift();
     this.hold = true;
     clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => this.release(), 700);
@@ -196,6 +226,7 @@ export class AutoScroll {
 
   destroy() {
     this.pause();
+    this.unshift();
     clearTimeout(this.idleTimer);
     removeEventListener('wheel', this.onUser);
     removeEventListener('touchstart', this.onUser);
