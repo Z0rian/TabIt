@@ -14,6 +14,21 @@ from util import context_for, launch, start_server
 LINES = '\n'.join(f'[ch]G[/ch]          [ch]C[/ch]         [ch]D[/ch]\nLine number {i} of a song that goes on and on for a while' for i in range(60))
 SONG = {'id': 's-scroll', 'title': 'Long Road', 'artist': 'Test', 'content': '[Verse]\n' + LINES}
 
+# every kind of line, mixed: the speed must not change from one to the next
+VERSE = [
+    '[ch]G[/ch]          [ch]C[/ch]',
+    'Words on a line with chords above them',
+    'A line of words with no chords at all',
+    '',
+    '[ch]Am[/ch]   [ch]F[/ch]   [ch]C[/ch]   [ch]G[/ch]',
+    '',
+    'e|-----0-----0-----|', 'B|---1---1-----1---|', 'G|-0-------0-------|',
+    'D|-----------------|', 'A|-----------------|', 'E|-----------------|',
+]
+NOTES = ['Some notes from the author before the song.', 'Capo: none', '']
+MIXED_SONG = {'id': 's-mixed', 'title': 'Mixed Bag', 'artist': 'Test',
+              'content': chr(10).join(NOTES + [line for i in range(10) for line in [f'[Verse {i + 1}]'] + VERSE])}
+
 SEED = """async (song) => {
   const store = await import('/js/store.js');
   const model = await import('/js/model.js');
@@ -102,6 +117,27 @@ def run(engine, device, base):
         later = page.evaluate('scrollY')
         check(after_drag < later < before, f'and it carries on from there ({after_drag:.0f} → {later:.0f}) instead of jumping back to {before:.0f}')
         play.click()
+
+        print(f'[{device}] a song with every kind of line: one steady speed')
+        page.evaluate(SEED, {**MIXED_SONG, 'duration': 24, 'durationFrom': 'you'})
+        page.goto(base + '/#/song/s-mixed')
+        page.wait_for_selector('.sheet .pair')
+        time.sleep(0.5)
+        first = page.evaluate("document.querySelector('.sheet > .blk:not(.pre)').getBoundingClientRect().top + scrollY")
+        notes = page.evaluate("document.querySelector('.sheet > .blk.pre').getBoundingClientRect().top + scrollY")
+        span = page.evaluate("import('/js/autoscroll.js').then(a => a.measure(document.querySelector('.sheet')))")
+        check(abs(span['start'] - first) < 1 and span['start'] > notes, 'it starts at the song itself, not the author’s notes above it')
+        page.locator('.deck .play').click()
+        time.sleep(2)  # (the glide to the first line)
+        ys = []
+        t0 = time.time()
+        while time.time() - t0 < 14:
+            ys.append((time.time() - t0, page.evaluate('scrollY')))
+            time.sleep(1)
+        speeds = sorted((y2 - y1) / (t2 - t1) for (t1, y1), (t2, y2) in zip(ys, ys[1:]))
+        low, high = speeds[1], speeds[-2]
+        check(low > 0 and high / low < 1.3, f'the same speed past titles, blank lines, chords and tab ({low:.0f}–{high:.0f} px/s)')
+        page.locator('.deck .play').click()
         if errors:
             raise AssertionError(errors)
         b.close()

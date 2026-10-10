@@ -133,7 +133,7 @@ def run(engine, device, base, rec):
         for _ in range(6):
             tools.locator('.tool-row', has_text='Text size').get_by_role('button', name='More').click()
         aligned(page, 'bigger text')
-        tools.locator('.tool-row', has_text='Simplify').get_by_role('switch').check(force=True)
+        tools.locator('.tool-row', has_text='Simplify').get_by_role('switch').check()
         names = page.evaluate(NAMES)
         check(not any('7' in x for x in names), f'simplified: {sorted(set(names))}')
         tools.get_by_role('button', name='Reset to the original').click()
@@ -166,9 +166,9 @@ def run(engine, device, base, rec):
         expect(page.locator('.drawer')).to_have_count(0)  # (closed before the next one opens)
         page.get_by_role('button', name='Display: transpose, capo, size').click()
         tools = page.locator('.drawer')
-        tools.locator('.tool-row', has_text='Lyrics only').get_by_role('switch').check(force=True)
+        tools.locator('.tool-row', has_text='Lyrics only').get_by_role('switch').check()
         check(page.locator('.sheet .cn').first.is_hidden(), 'lyrics only hides the chords')
-        tools.locator('.tool-row', has_text='Lyrics only').get_by_role('switch').uncheck(force=True)
+        tools.locator('.tool-row', has_text='Lyrics only').get_by_role('switch').uncheck()
         page.keyboard.press('Escape')
         view = page.evaluate("async () => (await import('/js/store.js')).store.lib.songs['s-orange'].view || {}")
         check('voicings' in view and 'tr' not in view, f'per-song settings saved with the song ({sorted(view)})')
@@ -205,8 +205,10 @@ def run(engine, device, base, rec):
         page.evaluate('window.__fakePlayer.playVideo()')
         expect(page.locator('.deck .play')).to_have_attribute('aria-label', 'Pause autoscroll', timeout=5000)
         check(True, 'pressing play in the video starts the autoscroll (follow the video)')
-        page.get_by_role('button', name='Close video').click()
-        check(page.locator('.yt').count() == 0, 'the player closes')
+        # (force: Playwright's WebKit counts the page scrolling under a fixed
+        # button as the button moving; it doesn't, see tests/e2e_deck.py for taps)
+        page.get_by_role('button', name='Close video').click(force=True)
+        check(page.locator('.yt').count() == 0, 'the player closes while the song plays')
         if errors:
             raise AssertionError(errors)
         b.close()

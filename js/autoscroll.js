@@ -1,11 +1,13 @@
 // Autoscroll that knows how long the song is.
 //
-// The whole sheet scrolls past in the song's length (from YouTube when known,
-// otherwise an estimate from the number of lines, between 2 and 7 minutes), at
-// the speed set on the slider. It's paced by lines, not pixels: a section
-// title or a blank line takes almost no time, a tab staff takes a few lines'
-// worth, the author's notes before the song start don't hold it up. The line
-// being played stays about a third of the way down the screen.
+// The song scrolls past in its length (from YouTube when known, otherwise an
+// estimate from the number of lines, between 2 and 7 minutes), times the speed
+// on the slider, at one steady speed: from its first line (the author's notes
+// before the song are skipped, with a short glide) to its last. The line being
+// played stays about a third of the way down the screen.
+//
+// (It used to give every line the same time, but lines aren't the same height,
+// so the speed changed at almost every line.)
 //
 // Scrolling by hand while it plays is fine: it carries on from wherever you
 // leave it.
@@ -21,42 +23,28 @@ export function estimateDuration(weights) {
   return Math.round(Math.min(MAX_EST, Math.max(MIN_EST, total * DEFAULT_SECONDS_PER_LINE)));
 }
 
-// The sheet's blocks as (weight, top, height) in page coordinates.
+// Where the song starts and ends on the page (y, page coordinates): its first
+// block after the author's notes, and the bottom of its last block.
 export function measure(sheet) {
-  const top0 = sheet.getBoundingClientRect().top + scrollY;
-  const out = [];
-  for (const b of sheet.children) {
-    const r = b.getBoundingClientRect();
-    out.push({ w: +b.dataset.w || 0, y: r.top + scrollY - top0, h: r.height });
-  }
-  return { top: top0, blocks: out, total: out.reduce((a, b) => a + b.w, 0) };
+  const blocks = [...sheet.children];
+  const top = sheet.getBoundingClientRect().top + scrollY;
+  if (!blocks.length) return { start: top, end: top };
+  const first = blocks.find(b => !b.classList.contains('pre')) || blocks[0];
+  const last = blocks.findLast(b => !b.classList.contains('gap')) || blocks.at(-1);
+  const start = first.getBoundingClientRect().top + scrollY;
+  return { start, end: Math.max(start, last.getBoundingClientRect().bottom + scrollY) };
 }
+
+const clamp01 = x => Math.max(0, Math.min(1, x));
 
 // fraction of the song (0..1) → y (page coordinate) of the line being played
 export function yAt(map, f) {
-  if (!map.blocks.length || map.total <= 0) return map.top;
-  let target = Math.max(0, Math.min(1, f)) * map.total;
-  for (const b of map.blocks) {
-    if (target <= b.w) return map.top + b.y + (b.w ? (target / b.w) * b.h : 0);
-    target -= b.w;
-  }
-  const last = map.blocks.at(-1);
-  return map.top + last.y + last.h;
+  return map.start + clamp01(f) * (map.end - map.start);
 }
 
 // inverse: y → fraction
 export function fractionAt(map, y) {
-  if (!map.blocks.length || map.total <= 0) return 0;
-  const rel = y - map.top;
-  let acc = 0;
-  for (const b of map.blocks) {
-    if (rel < b.y + b.h) {
-      const inside = b.h ? Math.max(0, Math.min(1, (rel - b.y) / b.h)) : 0;
-      return Math.max(0, Math.min(1, (acc + inside * b.w) / map.total));
-    }
-    acc += b.w;
-  }
-  return 1;
+  return map.end > map.start ? clamp01((y - map.start) / (map.end - map.start)) : 0;
 }
 
 export class AutoScroll {

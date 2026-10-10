@@ -223,13 +223,61 @@ export function view(route, { go, back }) {
     const speedOut = h('span', {});
     const slider = h('input', { type: 'range', class: 'deck-speed', min: '-1', max: '1', step: '0.01', value: String(Math.log2(vs().speed || 1)), 'aria-label': 'Autoscroll speed' });
     const prog = h('i', {});
-    const el = h('div', { class: 'deck', role: 'region', 'aria-label': 'Autoscroll' },
-      h('div', { class: 'deck-progress' }, prog),
-      playBtn,
+    const grip = h('button', { type: 'button', class: 'deck-grip' }, h('i', {}));
+    const more = h('div', { class: 'deck-more' },
       h('div', { class: 'deck-mid' }, h('div', { class: 'deck-time' }, time, speedOut), slider),
       iconButton('video', 'Play along on YouTube', () => toggleVideo()),
       iconButton('text', 'Display', () => openTools()));
+    const el = h('div', { class: 'deck', role: 'region', 'aria-label': 'Autoscroll' },
+      h('div', { class: 'deck-progress' }, prog), grip, playBtn, more);
     playBtn.addEventListener('click', () => { ensureScroller(); scroller.toggle(); });
+
+    // Swipe it right (or tap the grip) and it tucks into the corner: just the
+    // grip and play/pause. Swipe it left or tap the grip to bring it back.
+    const tuck = on => {
+      el.classList.toggle('tucked', on);
+      more.inert = on;
+      grip.setAttribute('aria-label', on ? 'Show the autoscroll controls' : 'Tuck the controls into the corner');
+      grip.setAttribute('aria-expanded', String(!on));
+      prefs.set('deckTucked', on);
+    };
+    tuck(!!prefs.get('deckTucked'));
+    grip.addEventListener('click', () => tuck(!el.classList.contains('tucked')));
+    let drag = null;
+    let swiped = 0;
+    el.addEventListener('pointerdown', e => {
+      if (e.target.closest('.deck-speed')) return; // that one is for the speed
+      drag = { id: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, on: false };
+    });
+    el.addEventListener('pointermove', e => {
+      if (!drag || e.pointerId !== drag.id) return;
+      const dx = e.clientX - drag.x;
+      if (!drag.on) {
+        if (Math.abs(dx) < 10 || Math.abs(dx) < Math.abs(e.clientY - drag.y)) return;
+        drag.on = true;
+        el.setPointerCapture(e.pointerId);
+        el.classList.add('dragging');
+      }
+      drag.dx = dx;
+      // it follows the finger: rightwards to tuck it, leftwards to bring it out
+      el.style.translate = `${el.classList.contains('tucked') ? Math.min(0, dx) : Math.max(0, dx)}px 0`;
+    });
+    const endDrag = () => {
+      if (!drag) return;
+      const { dx, on } = drag;
+      drag = null;
+      if (!on) return;
+      el.classList.remove('dragging');
+      el.style.translate = '';
+      swiped = Date.now();
+      const tucked = el.classList.contains('tucked');
+      if (!tucked && dx > 50) tuck(true);
+      else if (tucked && dx < -30) tuck(false);
+    };
+    el.addEventListener('pointerup', endDrag);
+    el.addEventListener('pointercancel', endDrag);
+    // a swipe that started on a button isn't a tap on it
+    el.addEventListener('click', e => { if (Date.now() - swiped < 400) { e.stopPropagation(); e.preventDefault(); } }, true);
     time.addEventListener('click', () => openLength());
     slider.addEventListener('input', () => {
       const sp = Math.round(2 ** +slider.value * 100) / 100;
@@ -484,8 +532,18 @@ export function view(route, { go, back }) {
       toast(prefs.get('followVideo') ? 'The song scrolls with the video while it plays' : 'Autoscroll runs on its own');
     }, { cls: prefs.get('followVideo') ? 'on' : '' });
     const miniBtn = iconButton('down', 'Shrink', () => ytBox.classList.toggle('mini'));
+    // (closes as the finger lifts, too: Safari can drop the tap itself while the
+    // page is busy scrolling; and no stray tap lands on what was under it)
+    const closeBtn = iconButton('close', 'Close video', () => closeVideo());
+    closeBtn.addEventListener('touchend', e => {
+      const t = e.changedTouches[0];
+      const r = closeBtn.getBoundingClientRect();
+      if (!t || t.clientX < r.left - 12 || t.clientX > r.right + 12 || t.clientY < r.top - 12 || t.clientY > r.bottom + 12) return; // slid off: no
+      e.preventDefault();
+      closeVideo();
+    }, { passive: false });
     ytBox = h('div', { class: 'yt', role: 'region', 'aria-label': 'YouTube player' },
-      h('div', { class: 'yt-bar' }, h('span', {}, song.title), followBtn, miniBtn, iconButton('close', 'Close video', () => closeVideo())),
+      h('div', { class: 'yt-bar' }, h('span', {}, song.title), followBtn, miniBtn, closeBtn),
       frame);
     document.body.append(ytBox);
     dragBox(ytBox);
@@ -497,10 +555,12 @@ export function view(route, { go, back }) {
   }
 
   function closeVideo() {
+    const box = ytBox;
+    ytBox = null;
+    box?.remove();
+    player?.pause(); // the sound stops at once, whatever happens next
     player?.destroy();
     player = null;
-    ytBox?.remove();
-    ytBox = null;
   }
 
   async function chooseVideo() {
@@ -691,11 +751,16 @@ function dragBox(box) {
   handle.addEventListener('pointerdown', e => {
     if (e.target.closest('button')) return;
     const r = box.getBoundingClientRect();
-    start = { x: e.clientX, y: e.clientY, left: r.left, top: r.top };
-    handle.setPointerCapture(e.pointerId);
+    start = { x: e.clientX, y: e.clientY, left: r.left, top: r.top, moving: false };
   });
   handle.addEventListener('pointermove', e => {
     if (!start) return;
+    // only a real drag takes the finger (a tap stays a tap)
+    if (!start.moving) {
+      if (Math.hypot(e.clientX - start.x, e.clientY - start.y) < 6) return;
+      start.moving = true;
+      handle.setPointerCapture(e.pointerId);
+    }
     const left = Math.max(4, Math.min(innerWidth - box.offsetWidth - 4, start.left + e.clientX - start.x));
     const top = Math.max(4, Math.min(innerHeight - 60, start.top + e.clientY - start.y));
     Object.assign(box.style, { left: left + 'px', top: top + 'px', right: 'auto', bottom: 'auto' });

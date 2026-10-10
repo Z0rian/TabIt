@@ -18,6 +18,7 @@ export const DEFAULTS = {
   followVideo: true,
   defaultLength: 0, // seconds; 0 = estimate from the song
   splash: true, // a pun on the loading screen
+  deckTucked: false, // the autoscroll bar tucked into the corner
 };
 
 let cache = null;

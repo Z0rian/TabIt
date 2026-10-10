@@ -21,9 +21,11 @@ Live at **https://z0rian.github.io/TabIt/**. Add it to the home screen
   the song's first chord.
 - **Autoscroll** paced by the song's length: from the YouTube video once
   you've played it there, otherwise estimated (most songs come out at 2 to
-  3 minutes). The slider makes it faster or slower; scroll by hand and it
-  carries on from there. With *Follow the video* on, it scrolls along with
-  the YouTube player.
+  3 minutes), at one steady speed from the song's first line. The slider
+  makes it faster or slower; scroll by hand and it carries on from there.
+  With *Follow the video* on, it scrolls along with the YouTube player. Swipe
+  the bar right (or tap its grip) to tuck it into the corner as just
+  play/pause.
 - **Chords** tab: any chord you can type, every shape, in any tuning.
 - **Tuner**: steady needle (the pitch is low-pass filtered over a quarter
   second), any tuning, A4 calibration, reference notes.
