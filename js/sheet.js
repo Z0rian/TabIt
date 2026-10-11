@@ -13,7 +13,8 @@
 // (fitChords). Chords are positioned the same way either way, so every chord on
 // a line sits on exactly the same baseline.
 //
-// Tablature is monospace and wraps all lines of a staff at the same column.
+// Tablature is monospace; a staff that doesn't fit is cut into rows (all its
+// lines at the same columns), at bar lines where it can.
 
 const NBSP = String.fromCharCode(160);
 
@@ -135,10 +136,27 @@ function sectionLine(b) {
 
 function tabBlock(b, show) {
   const t = el('div', 'blk tab');
-  t._lines = b.lines.map(l => ({ text: l.text, chords: l.chords.map(c => ({ col: c.col, name: show(c.name), orig: c.name })) }));
+  t._segs = tabSegments(b.lines.map(l => ({ text: l.text, staff: !!l.staff, chords: l.chords.map(c => ({ col: c.col, name: show(c.name), orig: c.name })) })));
   renderTab(t, Infinity);
   return t;
 }
+
+// ---------- tablature ----------
+//
+// A tab block holds staves, each with the rows that go with it (chord names,
+// beat marks and measure numbers above it, picking fingers below), headings
+// ("Part A", "Lick 1:") and notes. Each staff is laid out on its own: as
+// written when it fits; a little smaller if that makes it take fewer rows;
+// otherwise cut into rows of about equal length, at bar lines where it can,
+// through rests where it can't, never through a fret number or a chord name.
+// Wrapped rows start with the string names again.
+
+const TAB_SCALES = [1, 0.95, 0.9, 0.86];
+const WORDY = /\p{L}{3,}|\S:\s*$/u;
+// What a staff row says after its last bar ("R1", "x2", "Repeat as needed").
+const TRAIL_RX = /^(.*\|)( +)(\S.*?)\s*$/;
+// The string names and opening bar ("e|", "D#|", "|"; "e" when there's no bar).
+const HEAD_RX = /^(?:[A-Ga-g][#b]?\s?)?[|:]|^[A-Ga-g][#b]?(?=[-–—])/;
 
 // Chord names over a staff, re-placed after transposing (names change length).
 function chordRowText(line) {
@@ -154,61 +172,178 @@ function chordRowText(line) {
   return { text, parts };
 }
 
-// Columns where every line of the staff can be cut: after a bar line if
-// possible, never through a fret number or a chord name.
-function cutPoints(texts, width) {
-  const len = Math.max(...texts.map(t => t.length));
-  const ok = col => texts.every(t => {
-    const a = t[col - 1], b = t[col];
-    return a === undefined || b === undefined || !(/[0-9]/.test(a) && /[0-9]/.test(b)) && !(/[A-Za-z#]/.test(a) && /[A-Za-z0-9#/]/.test(b));
+// A tab block's rows, in parts: [{ plain, rows }] for text, and for each staff
+// { titles, rows, bare (its rows without the words after the bars), notes
+// (those words), head (columns of string names, 0 when they differ), full and
+// len (the longest row with and without those words) }.
+export function tabSegments(lines) {
+  const rows = lines.map(l => {
+    const r = chordRowText(l);
+    return r ? { text: r.text, parts: r.parts, staff: false } : { text: l.text, parts: [], staff: !!l.staff };
   });
-  const staves = texts.filter(t => /[|]/.test(t) && /-{2}/.test(t));
-  const bar = col => staves.length > 0 && staves.every(t => t[col - 1] === '|' || t[col - 1] === undefined) && ok(col);
+  const groups = [];
+  let cur = [];
+  for (const r of rows) {
+    if (!r.text.trim() && !r.parts.length) { if (cur.length) groups.push(cur); cur = []; } else cur.push(r);
+  }
+  if (cur.length) groups.push(cur);
+  const out = [];
+  for (const g of groups) for (const part of splitStaves(g)) out.push(staffSeg(part));
+  return out;
+}
+
+// Staves stacked without a blank line between them are laid out one by one;
+// the rows between two go with the one below (its chord names and heading).
+function splitStaves(rows) {
+  const runs = [];
+  for (let i = 0; i < rows.length; i++) {
+    if (!rows[i].staff) continue;
+    let j = i;
+    while (j < rows.length && rows[j].staff) j++;
+    runs.push([i, j]);
+    i = j - 1;
+  }
+  const cuts = [];
+  for (let k = 1; k < runs.length; k++) {
+    const [a, b] = runs[k - 1], [c, d] = runs[k];
+    if (b - a >= 3 && d - c >= 3) cuts.push(b);
+  }
+  if (!cuts.length) return [rows];
+  const parts = [];
+  let start = 0;
+  for (const c of cuts) { parts.push(rows.slice(start, c)); start = c; }
+  parts.push(rows.slice(start));
+  return parts;
+}
+
+function staffSeg(rows) {
+  if (!rows.some(r => r.staff)) return { plain: true, rows };
+  const first = rows.findIndex(r => r.staff);
+  let k = 0;
+  const titles = [];
+  while (k < first && !rows[k].parts.length && WORDY.test(rows[k].text)) titles.push(rows[k++].text.trim());
+  const body = rows.slice(k);
+  const notes = [];
+  const bare = body.map(r => {
+    const m = r.staff && TRAIL_RX.exec(r.text);
+    if (!m || !/\p{L}/u.test(m[3]) || /[-–—]{2}/.test(m[3])) return r;
+    if (!notes.includes(m[3])) notes.push(m[3]);
+    return { ...r, text: m[1] };
+  });
+  const heads = bare.filter(r => r.staff).map(r => HEAD_RX.exec(r.text)?.[0] || '');
+  const head = heads.every(h => h && h.length === heads[0].length) ? heads[0].length : 0;
+  const longest = list => Math.max(...list.map(r => r.text.length));
+  return { titles, rows: body, bare, notes, head, full: longest(body), len: longest(bare) };
+}
+
+// Columns to cut a staff's rows at, so that the first is at most `width`
+// long and the others, with `head` columns of string names put in front, too.
+export function cutPoints(rows, width, head = 0) {
+  const texts = rows.map(r => r.text);
+  const len = Math.max(...texts.map(t => t.length));
+  if (len <= width) return [];
+  if (width - head < 8) head = 0;
+  const staves = texts.filter((t, i) => rows[i].staff);
+  const at = (t, c) => t[c] ?? '';
+  // never through a number or a name
+  const ok = c => texts.every(t => !(/\d/.test(at(t, c - 1)) && /\d/.test(at(t, c))) && !(/[A-Za-z#]/.test(at(t, c - 1)) && /[A-Za-z0-9#/]/.test(at(t, c))));
+  const bar = c => staves.every(t => '|:'.includes(at(t, c - 1)) || c > t.length) && ok(c);
+  const rest = c => staves.every(t => /^[-–—|:]?$/.test(at(t, c - 1)) && /^[-–—|:]?$/.test(at(t, c))) && ok(c);
   const cuts = [];
   let start = 0;
-  while (len - start > width) {
-    let cut = -1;
-    for (let c = start + width; c > start + width * 0.5; c--) if (bar(c)) { cut = c; break; }
-    if (cut < 0) for (let c = start + width; c > start + 1; c--) if (ok(c)) { cut = c; break; }
-    if (cut < 0) cut = start + width;
+  for (;;) {
+    const room = start ? width - head : width;
+    if (len - start <= room) break;
+    const from = start || head;
+    const per = width - head;
+    const m = (len - from) / Math.ceil((len - from) / per);
+    const target = Math.round(from + m);
+    const lo = start + 2, hi = start + room;
+    const win = Math.max(2, Math.round(m * 0.35));
+    const near = (test, a, b) => {
+      let best = -1;
+      for (let c = Math.max(lo, a); c <= Math.min(hi, b); c++) if (test(c) && (best < 0 || Math.abs(c - target) < Math.abs(best - target))) best = c;
+      return best;
+    };
+    let cut = near(bar, target - win, target + win);
+    if (cut < 0) cut = near(rest, target - win, target + win);
+    if (cut < 0) cut = near(ok, lo, hi);
+    if (cut < 0) cut = hi;
     cuts.push(cut);
     start = cut;
   }
   return cuts;
 }
 
-function renderTab(t, width) {
-  const lines = t._lines.map(l => {
-    const row = chordRowText(l);
-    return row ? { text: row.text, parts: row.parts } : { text: l.text, parts: [] };
-  });
-  const texts = lines.map(l => l.text);
-  const cuts = Number.isFinite(width) ? cutPoints(texts, Math.max(8, width)) : [];
-  const bounds = [0, ...cuts, Infinity];
-  t.replaceChildren();
-  for (let s = 0; s + 1 < bounds.length; s++) {
-    const a = bounds[s], z = bounds[s + 1];
-    const sys = el('div', 'sys');
-    for (const l of lines) {
-      const row = el('div', 'tl');
-      const stop = z === Infinity ? l.text.length : Math.min(z, l.text.length);
-      if (!l.parts.length) { row.textContent = l.text.slice(a, stop) || NBSP; sys.append(row); continue; }
-      let pos = a;
-      for (const p of l.parts) {
-        if (p.col < a || p.col >= z) continue;
-        if (p.col > pos) row.append(l.text.slice(pos, p.col));
-        const c = el('b', 'cn tc', p.name);
-        c.dataset.chord = p.name;
-        if (p.orig !== p.name) c.dataset.orig = p.orig;
-        row.append(c);
-        pos = p.col + p.name.length;
-      }
-      if (pos < stop) row.append(l.text.slice(pos, stop));
-      if (!row.childNodes.length) row.textContent = NBSP;
-      sys.append(row);
-    }
-    t.append(sys);
+// How a staff fits `cols` columns: its size, whether the words after the bars
+// go above it, and where it's cut. The fewest rows, then the biggest size.
+export function planStaff(seg, cols) {
+  let best = null;
+  for (const scale of TAB_SCALES) {
+    const width = Math.floor(cols / scale);
+    const p = seg.full <= width ? { scale, bare: false, cuts: [] }
+      : { scale, bare: true, cuts: seg.len <= width ? [] : cutPoints(seg.bare, width, seg.head) };
+    if (!best || p.cuts.length < best.cuts.length) best = p;
+    if (!p.cuts.length) break;
   }
+  return best;
+}
+
+function tabRowEl(r, a, z, prefix) {
+  const row = el('div', r.staff ? 'tl st' : 'tl');
+  if (prefix) row.append(prefix);
+  const stop = Math.min(z, r.text.length);
+  let pos = a;
+  for (const p of r.parts) {
+    if (p.col < a || p.col >= z) continue;
+    if (p.col > pos) row.append(r.text.slice(pos, p.col));
+    const c = el('b', 'cn tc', p.name);
+    c.dataset.chord = p.name;
+    if (p.orig !== p.name) c.dataset.orig = p.orig;
+    row.append(c);
+    pos = p.col + p.name.length;
+  }
+  if (pos < stop) row.append(r.text.slice(pos, stop));
+  if (!row.childNodes.length) row.textContent = NBSP;
+  return row;
+}
+
+function renderTab(t, cols) {
+  t.replaceChildren();
+  for (const seg of t._segs) {
+    const box = el('div', seg.plain ? 'tseg plain' : 'tseg');
+    t.append(box);
+    if (seg.plain) {
+      for (const r of seg.rows) box.append(tabRowEl(r, 0, Infinity, ''));
+      continue;
+    }
+    const plan = Number.isFinite(cols) ? planStaff(seg, cols) : { scale: 1, bare: false, cuts: [] };
+    if (plan.scale !== 1) box.style.fontSize = `${plan.scale}em`;
+    for (const x of [...seg.titles, ...(plan.bare ? seg.notes : [])]) box.append(el('div', 'tt', x));
+    const rows = plan.bare ? seg.bare : seg.rows;
+    const bounds = [0, ...plan.cuts, Infinity];
+    const head = seg.head && Math.floor(cols / plan.scale) - seg.head >= 8 ? seg.head : 0;
+    box.dataset.head = String(plan.cuts.length ? head : 0);
+    for (let k = 0; k + 1 < bounds.length; k++) {
+      const a = bounds[k], z = bounds[k + 1];
+      const sys = el('div', 'sys');
+      sys.dataset.a = String(a);
+      for (const r of rows) {
+        // a row with nothing on it in this part of the staff is left out (the staff's own rows never are)
+        if (!r.staff && !r.text.slice(a, z).trim()) continue;
+        sys.append(tabRowEl(r, a, z, k && head ? (r.staff ? r.text.slice(0, head) : ' '.repeat(head)) : ''));
+      }
+      box.append(sys);
+    }
+  }
+}
+
+// How long a tab block takes to play, in lyric lines: its staves by their
+// length (a lyric line's worth is about 28 columns), and its text.
+export function tabWeight(segs) {
+  let w = 0;
+  for (const seg of segs) w += seg.plain ? seg.rows.length * 0.5 : Math.max(0.8, (seg.len - seg.head) / 28) + seg.titles.length * 0.15;
+  return Math.max(1, w);
 }
 
 // How long each kind of line takes to play, relative to a lyric line. The
@@ -229,7 +364,7 @@ export function renderSheet(doc, { chordName, mono = false, hideChords = false }
     else if (b.type === 'lyric') e = el('div', 'blk lyric', b.text);
     else e = el('div', 'blk gap');
     const kind = e.classList[1];
-    let w = kind === 'tab' ? Math.max(1, b.lines.filter(l => l.text.trim()).length / 3) : WEIGHT[kind] ?? 1;
+    let w = kind === 'tab' ? tabWeight(e._segs) : WEIGHT[kind] ?? 1;
     if (i < firstMusic) { w *= 0.15; e.classList.add('pre'); }
     e.dataset.w = String(w);
     root.append(e);
@@ -305,7 +440,7 @@ function charWidth(t) {
   return w || 8;
 }
 
-// Re-wraps tablature to the sheet's width.
+// Lays tablature out again for the sheet's width.
 export function layoutTabs(root) {
   for (const t of root.querySelectorAll('.blk.tab')) {
     const cs = getComputedStyle(t);
@@ -314,8 +449,7 @@ export function layoutTabs(root) {
     const cols = Math.floor(avail / charWidth(t));
     if (t._cols === cols) continue;
     t._cols = cols;
-    const longest = Math.max(...t._lines.map(l => (chordRowText(l)?.text || l.text).length));
-    renderTab(t, longest > cols ? cols : Infinity);
+    renderTab(t, cols);
   }
 }
 
@@ -341,6 +475,9 @@ export function watchSheet(root) {
   const refit = () => { if (!stopped) { last = ''; run(); } };
   document.fonts?.addEventListener?.('loadingdone', refit);
   document.fonts?.ready?.then(refit);
+  // (WebKit doesn't always say when a font has loaded: the tab font's columns
+  // are measured again once it's there)
+  if (root.querySelector('.tab') || root.classList.contains('mono')) document.fonts?.load?.(`${getComputedStyle(root).fontSize} "JetBrains Mono"`).then(refit, () => {});
   run();
   return () => {
     stopped = true;

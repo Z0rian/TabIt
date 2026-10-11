@@ -13,6 +13,7 @@ export const DEFAULTS = {
   keepAwake: true,
   sort: 'added',
   filter: 'all',
+  ugType: 'all', // what Ultimate Guitar search shows: all | Chords | Tabs
   a4: 440,
   tuning: 'standard',
   followVideo: true,

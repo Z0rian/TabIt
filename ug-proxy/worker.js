@@ -3,8 +3,10 @@
  *
  * Same endpoints as version 1, with more in every answer (older TabIt
  * versions ignore the extra fields):
- *   ?action=search&q=QUERY      → { results: [{ title, artist, type, rating, votes, url,
+ *   ?action=search&q=QUERY      → { results: [{ title, artist, type, part, rating, votes, url,
  *                                    version, id, key, difficulty, cover }] }
+ *                                  (part: '' for the whole song, or 'intro', 'solo'…:
+ *                                  Ultimate Guitar numbers each part's versions apart)
  *   ?action=tab&url=TAB_URL     → { content, meta: { capo, key, tuning, difficulty },
  *                                    shapes: { chord: [[6 frets, low E first], …] },
  *                                    strumming: [{ part, bpm, … }], song: { … } }
@@ -71,6 +73,7 @@ async function search(q) {
       title: r.song_name ?? '',
       artist: r.artist_name ?? '',
       type: r.type ?? '',
+      part: r.part || '',
       rating: +(+(r.rating ?? 0)).toFixed(2),
       votes: r.votes ?? 0,
       url: r.tab_url ?? '',
@@ -107,7 +110,7 @@ async function tab(tabUrl) {
       meta: { capo: meta.capo ?? null, key: meta.tonality || t.tonality_name || '', tuning: meta.tuning?.value || '', difficulty: t.difficulty || '' },
       shapes,
       strumming: (view.strummings ?? []).map(s => ({ part: s.part, bpm: s.bpm, denominator: s.denuminator, triplet: !!s.is_triplet, measures: (s.measures ?? []).map(m => m.measure) })),
-      song: { title: t.song_name || '', artist: t.artist_name || '', version: t.version ?? null, rating: t.rating ?? null, votes: t.votes ?? null, id: t.id ?? null, type: t.type || '' },
+      song: { title: t.song_name || '', artist: t.artist_name || '', version: t.version ?? null, rating: t.rating ?? null, votes: t.votes ?? null, id: t.id ?? null, type: t.type || '', part: t.part || '' },
     },
   };
 }

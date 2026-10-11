@@ -4,7 +4,7 @@
 import { h, iconButton, button, toast, confirmSheet, fmtTime, parseTime, debounce, fill } from '../ui.js';
 import { store, dispatch } from '../store.js';
 import { makeSong } from '../model.js';
-import { parseSong, toPlainText, fromPlainText } from '../parse.js';
+import { parseSong, toPlainText, fromPlainText, guessKind } from '../parse.js';
 import { renderSheet, watchSheet } from '../sheet.js';
 import { detectKey } from '../theory.js';
 import { videoIdFrom } from '../ug.js';
@@ -59,7 +59,7 @@ export function view(route, { go, back }) {
     const vid = yt.value.trim() ? videoIdFrom(yt.value) : null;
     if (yt.value.trim() && !vid) { toast('That doesn’t look like a YouTube link.'); yt.focus(); return; }
     const fields = {
-      title: t, artist: artist.value.trim(), content,
+      title: t, artist: artist.value.trim(), content, kind: guessKind(doc),
       key: key.value.trim() || detectKey(doc.chords) || null,
       capo: +capo.value || null,
       tuning: tuning.value.trim() && tuning.value.trim() !== 'E A D G B E' ? tuning.value.trim() : null,

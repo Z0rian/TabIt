@@ -31,6 +31,7 @@
     import { renderSheet, watchSheet } from '../js/sheet.js';
     import { transposeChord, keyPrefersFlats, transposeKey } from '../js/theory.js';
     import { checkSheet, expectedAnchors } from './align.js';
+    import { checkTabs } from './tabcheck.js';
 
     const $ = id => document.getElementById(id);
     const params = new URLSearchParams(location.search);
@@ -48,6 +49,14 @@
     async function load(key) {
       const rec = await (await fetch(`corpus/songs/${key}.json`)).json();
       current = { key, rec };
+      draw();
+      return true;
+    }
+
+    // a tab from tests/corpus/tabs
+    async function loadTab(name) {
+      const rec = await (await fetch(`corpus/tabs/${name}.json`)).json();
+      current = { key: name, rec: { ...rec, meta: { tonality: rec.meta?.key || '' } } };
       draw();
       return true;
     }
@@ -80,7 +89,8 @@
       return r;
     }
 
-    window.__tabit = { load, draw, check, loadIndex, expectedAnchors, checkSheet,
+    window.__tabit = { load, loadTab, draw, check, loadIndex, expectedAnchors, checkSheet,
+      checkTabs: () => checkTabs(document.querySelector('.sheet')),
       set(opts) {
         if ('w' in opts) $('w').value = opts.w;
         if ('fs' in opts) $('fs').value = opts.fs;

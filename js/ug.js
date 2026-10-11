@@ -35,15 +35,33 @@ async function call(params, { signal, timeout = 20000 } = {}) {
 }
 
 const TYPE_ORDER = { Chords: 0, Tabs: 1, Tab: 1, Pro: 2 };
+export const isTabType = t => t === 'Tabs' || t === 'Tab';
+// What a version is called on a button or in a list.
+export const typeName = t => (isTabType(t) ? 'Tab' : t === 'Pro' ? 'Guitar Pro' : t || 'Chords');
+// The kind of version, with the part of the song it's of: "Tab", "Intro tab".
+export function versionKind(v) {
+  const name = typeName(v.type);
+  const part = String(v.part || '').trim();
+  return part ? `${part[0].toUpperCase()}${part.slice(1)} ${name.toLowerCase()}` : name;
+}
 
 // Search results, each numbered with its version (the worker may not send it:
 // Ultimate Guitar lists versions of a song in order, so count them).
 export async function searchUG(q, opts) {
   const data = await call({ action: 'search', q }, opts);
   return numberVersions((data.results || []).map(r => ({
-    title: r.title || '', artist: r.artist || '', type: r.type || '', rating: +r.rating || 0, votes: +r.votes || 0, url: r.url || '',
+    title: r.title || '', artist: r.artist || '', type: r.type || '', part: r.part || '', rating: +r.rating || 0, votes: +r.votes || 0, url: r.url || '',
     version: r.version ?? null, id: r.id ?? idFromUrl(r.url), key: r.key || r.tonality || '', difficulty: r.difficulty || '', cover: r.cover || '',
   })).filter(r => r.url));
+}
+
+// Which worker is deployed: 1 (the first), 2 (capo, shapes, covers…), 3 (and
+// which part of a song a tab is). (A fresh question each time: answers are
+// kept at Cloudflare for an hour, across deploys.)
+export async function workerVersion(opts) {
+  const r = (await call({ action: 'search', q: 'wonderwall', fresh: Date.now() }, opts)).results || [];
+  if (!r.length) return 0;
+  return r.some(x => 'part' in x) ? 3 : r.some(x => x.cover || x.key) ? 2 : 1;
 }
 
 export const idFromUrl = url => +(/-(\d+)(?:$|[?#])/.exec(url || '')?.[1] || 0) || null;
@@ -51,7 +69,7 @@ export const idFromUrl = url => +(/-(\d+)(?:$|[?#])/.exec(url || '')?.[1] || 0) 
 export function numberVersions(results) {
   const seen = new Map();
   return results.map(r => {
-    const k = `${fold(r.artist)}|${fold(r.title)}|${r.type}`;
+    const k = `${fold(r.artist)}|${fold(r.title)}|${r.type}|${r.part || ''}`;
     const n = (seen.get(k) || 0) + 1;
     seen.set(k, n);
     return { ...r, version: r.version ?? n };
@@ -100,9 +118,9 @@ export function songFromTab(result, tab, extra = {}) {
   return makeSong({
     title: tab.song?.title || result.title,
     artist: tab.song?.artist || result.artist,
-    kind: result.type === 'Tabs' || result.type === 'Tab' ? 'tab' : 'chords',
+    kind: isTabType(result.type) ? 'tab' : 'chords',
     content: tab.content,
-    src: { site: 'ug', url: result.url, id: result.id || idFromUrl(result.url), version: result.version || tab.song?.version || 1, type: result.type || 'Chords', rating: result.rating, votes: result.votes },
+    src: { site: 'ug', url: result.url, id: result.id || idFromUrl(result.url), version: result.version || tab.song?.version || 1, type: result.type || 'Chords', part: result.part || tab.song?.part || undefined, rating: result.rating, votes: result.votes },
     key, capo: capo || undefined, tuning: tuning && tuning !== 'E A D G B E' ? tuning : undefined, bpm: bpm || undefined,
     cover: result.cover || tab.song?.cover || undefined,
     shapes: shapes && Object.keys(shapes).length ? shapes : undefined,
@@ -193,7 +211,8 @@ export function matchEntry(entry, results) {
   const want = UG_TYPE[entry.type.toLowerCase()] || entry.type;
   const same = numberVersions(results).filter(r => sameTitle(r.title, entry.title) && sameArtist(r.artist, entry.artist));
   const typed = same.filter(r => r.type === want && want !== 'Pro');
-  const exact = typed.find(r => r.version === entry.version);
+  // (the whole song before a part of it with the same number: UG numbers them apart)
+  const exact = typed.find(r => r.version === entry.version && !r.part) || typed.find(r => r.version === entry.version);
   if (exact) return { result: exact, how: 'exact' };
   if (typed.length) return { result: typed.reduce((a, b) => (score(b) > score(a) ? b : a)), how: 'closest' };
   const chords = same.filter(r => r.type === 'Chords');

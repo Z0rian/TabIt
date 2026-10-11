@@ -6,7 +6,7 @@ import { setupWithKey, signInWithPassword, addInvite, makeAccount, useAccount, r
 import { prefs, applyTheme, autoFontSize } from '../prefs.js';
 import { exportLibrary, addSongs } from '../importer.js';
 import { oldGist, fetchOldGist } from '../migrate.js';
-import { searchUG, PROXY } from '../ug.js';
+import { workerVersion, PROXY } from '../ug.js';
 import { persistent } from '../db.js';
 import { field } from './common.js';
 
@@ -306,9 +306,11 @@ export function view(route, { go }) {
     const check = button('Check', async () => {
       ug.textContent = 'Checking…';
       try {
-        const r = await searchUG('wonderwall');
-        const v2 = r.some(x => x.cover || x.key);
-        ug.textContent = r.length ? `Working${v2 ? '' : '. Update the worker to get capo, key and chord shapes with every tab (see ug-proxy/README in the repository).'}` : 'Answered, but found nothing.';
+        const v = await workerVersion();
+        ug.textContent = !v ? 'Answered, but found nothing.'
+          : v >= 3 ? 'Working'
+            : v === 2 ? 'Working. Update the worker to see which tabs are of part of a song (an intro, a solo): in Cloudflare, paste ug-proxy/worker.js from the TabIt repository and deploy.'
+              : 'Working. Update the worker to get capo, key and chord shapes with every tab: in Cloudflare, paste ug-proxy/worker.js from the TabIt repository and deploy.';
       } catch (e) { ug.textContent = e.message; }
     }, { cls: 'btn-small btn-ghost' });
     return group('About', [

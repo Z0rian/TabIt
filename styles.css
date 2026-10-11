@@ -422,6 +422,8 @@ button.chip-btn:active { transform: scale(0.97); }
   appearance: none; border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 6px 9px;
   font: 600 13px/1 var(--font-ui); color: var(--ink); display: inline-flex; gap: 6px; align-items: center;
 }
+.ug-types { margin: 4px 0 10px; }
+.ug-pro { margin: 10px 4px 0; }
 .ver-btn .stars { color: var(--accent); font-family: var(--font-mono); font-size: 12px; }
 .ver-btn .votes { color: var(--ink-3); font-weight: 500; }
 .ver-btn.best { border-color: var(--accent); }
@@ -541,6 +543,11 @@ button.chip-btn:active { transform: scale(0.97); }
 }
 .sheet .tab .sys + .sys { margin-top: 0.8em; padding-top: 0.8em; border-top: 1px dashed var(--line); }
 .sheet .tab .tl { white-space: pre; }
+.sheet .tab .tseg + .tseg { margin-top: 1em; }
+.sheet .tab .tt { white-space: pre-wrap; font-weight: 600; color: var(--ink-3); margin-bottom: 0.25em; }
+.sheet .tab .plain .tl { white-space: pre-wrap; }
+/* (JetBrains Mono's programming ligatures would turn "|-" into one sign) */
+.sheet .tab, .sheet.mono, .editor-area { font-variant-ligatures: none; font-feature-settings: 'liga' 0, 'calt' 0; }
 .sheet .tab .cn.tc { display: inline; font: inherit; font-weight: 700; color: var(--chord); padding: 0; }
 .sheet.mono { --cfs: 1; font-family: var(--font-mono); font-size: calc(var(--fs) * 0.84); }
 .sheet.mono .pair, .sheet.mono .lyric { line-height: 1.4; }

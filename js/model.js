@@ -314,7 +314,7 @@ export function searchSongs(songs, q) {
   const scored = [];
   for (const s of songs) {
     const title = fold(s.title), artist = fold(s.artist);
-    const hay = `${title} ${artist}`;
+    const hay = `${title} ${artist}${s.kind === 'tab' ? ' tab' : ''}`; // ("tab" finds your tabs)
     if (!words.every(w => hay.includes(w))) continue;
     let score = 0;
     if (title.startsWith(f)) score += 4;

@@ -10,7 +10,7 @@ import { renderSheet, watchSheet } from '../sheet.js';
 import { transposeChord, transposeKey, keyPrefersFlats, simplifyChord, detectKey } from '../theory.js';
 import { AutoScroll, WakeLock, estimateDuration } from '../autoscroll.js';
 import { Player } from '../youtube.js';
-import { findVideo, videoIdFrom, searchUG, groupResults, fetchTab, songFromTab } from '../ug.js';
+import { findVideo, videoIdFrom, searchUG, groupResults, fetchTab, songFromTab, versionKind } from '../ug.js';
 import { prefs, fontSize } from '../prefs.js';
 import { session } from '../session.js';
 import { openChord, chosenShape, diagram, tuningMidi } from './chordsheet.js';
@@ -121,14 +121,17 @@ export function view(route, { go, back }) {
     const chips = [];
     // the key, and next to it what opens the transpose menu (either one does)
     const tr = +vs().tr || 0;
-    if (key) chips.push(h('button', { type: 'button', class: 'chip accent chip-btn', 'aria-label': `Key ${sh ? transposeKey(key, sh) : key}: transpose`, onClick: openTranspose }, `Key ${sh ? transposeKey(key, sh) : key}`));
-    chips.push(h('button', { type: 'button', class: `chip chip-btn${tr ? ' accent' : ''}`, 'aria-label': tr ? `Transposed ${signed(tr)}: change` : 'Transpose', onClick: openTranspose },
+    // (a tab with no chord names in it has nothing to transpose)
+    const chords = doc.chords.length > 0;
+    if (key) chips.push(chords ? h('button', { type: 'button', class: 'chip accent chip-btn', 'aria-label': `Key ${sh ? transposeKey(key, sh) : key}: transpose`, onClick: openTranspose }, `Key ${sh ? transposeKey(key, sh) : key}`) : h('span', { class: 'chip accent' }, `Key ${key}`));
+    if (chords || tr) chips.push(h('button', { type: 'button', class: `chip chip-btn${tr ? ' accent' : ''}`, 'aria-label': tr ? `Transposed ${signed(tr)}: change` : 'Transpose', onClick: openTranspose },
       icon('transpose'), tr ? `${signed(tr)} semitone${Math.abs(tr) === 1 ? '' : 's'}` : 'Transpose'));
     if (capoNow()) chips.push(h('span', { class: 'chip accent' }, `Capo ${capoNow()}`));
     else if (origCapo()) chips.push(h('span', { class: 'chip' }, 'No capo'));
     if (song.tuning && song.tuning !== 'E A D G B E') chips.push(h('span', { class: 'chip', title: song.tuning }, tuningKey() !== 'standard' ? TUNINGS[tuningKey()].name : `Tuning ${song.tuning}`));
     if (song.bpm) chips.push(h('span', { class: 'chip' }, `${song.bpm} bpm`));
-    if (song.src?.site === 'ug') chips.push(h('span', { class: 'chip' }, `UG ver ${song.src.version || 1}${song.src.rating ? ` · ★${(+song.src.rating).toFixed(1)}` : ''}`));
+    if (song.src?.site === 'ug') chips.push(h('span', { class: 'chip' }, `UG ${song.kind === 'tab' || song.src.part ? `${versionKind({ type: song.src.type, part: song.src.part }).toLowerCase()} ` : ''}ver ${song.src.version || 1}${song.src.rating ? ` · ★${(+song.src.rating).toFixed(1)}` : ''}`));
+    else if (song.kind === 'tab') chips.push(h('span', { class: 'chip' }, 'Tab'));
     const cover = coverOf(song);
     const tile = () => initials(song.artist || song.title);
     fill(headEl,
@@ -147,7 +150,7 @@ export function view(route, { go, back }) {
   }
 
   function drawStrip() {
-    if (!prefs.get('diagrams') || vs().hide) { strip.hidden = true; return; }
+    if (!prefs.get('diagrams') || vs().hide || !doc.chords.length) { strip.hidden = true; return; }
     strip.hidden = false;
     const names = [...new Set(doc.chords.map(chordName))];
     fill(strip, ...names.map(name => {
@@ -340,17 +343,19 @@ export function view(route, { go, back }) {
     const draw = () => {
       const tr = +vs().tr || 0;
       const key = baseKey();
+      // (with no chord names in the song, only what changes how it looks)
+      const chords = doc.chords.length > 0;
       fill(body, 
-        toolRow('Transpose', key ? `Key ${transposeKey(key, tr)}${tr ? ` (was ${key})` : ''}` : 'Moves every chord up or down',
-          stepper(tr === 0 ? '0' : (tr > 0 ? `+${tr}` : String(tr)), () => { setView({ tr: wrap(tr - 1) || null }); draw(); }, () => { setView({ tr: wrap(tr + 1) || null }); draw(); })),
-        capoRow(draw),
+        chords ? toolRow('Transpose', key ? `Key ${transposeKey(key, tr)}${tr ? ` (was ${key})` : ''}` : 'Moves every chord up or down',
+          stepper(tr === 0 ? '0' : (tr > 0 ? `+${tr}` : String(tr)), () => { setView({ tr: wrap(tr - 1) || null }); draw(); }, () => { setView({ tr: wrap(tr + 1) || null }); draw(); })) : null,
+        chords ? capoRow(draw) : null,
         toolRow('Text size', 'Or pinch the song to zoom',
           stepper(String(vs().fs || fontSize()), () => { setView({ fs: Math.max(12, (vs().fs || fontSize()) - 1) }); draw(); }, () => { setView({ fs: Math.min(40, (vs().fs || fontSize()) + 1) }); draw(); })),
-        toolRow('Simplify chords', 'Cmaj7 → C, Am7 → Am, Dsus4 → D', toggle(vs().simplify, v => { setView({ simplify: v || null }); })),
-        toolRow('Chord diagrams', 'Above the song', toggle(prefs.get('diagrams'), v => { prefs.set('diagrams', v); drawStrip(); })),
-        toolRow('Lyrics only', 'Hide the chords', toggle(vs().hide, v => { setView({ hide: v || null }); })),
+        chords ? toolRow('Simplify chords', 'Cmaj7 → C, Am7 → Am, Dsus4 → D', toggle(vs().simplify, v => { setView({ simplify: v || null }); })) : null,
+        chords ? toolRow('Chord diagrams', 'Above the song', toggle(prefs.get('diagrams'), v => { prefs.set('diagrams', v); drawStrip(); })) : null,
+        chords ? toolRow('Lyrics only', 'Hide the chords', toggle(vs().hide, v => { setView({ hide: v || null }); })) : null,
         toolRow('Classic layout', 'Monospace text, like Ultimate Guitar', toggle(vs().mono ?? prefs.get('lyricFont') === 'mono', v => { setView({ mono: v === (prefs.get('lyricFont') === 'mono') ? null : v }); })),
-        toolRow('Left-handed diagrams', 'Mirror the chord boxes', toggle(prefs.get('leftHanded'), v => { prefs.set('leftHanded', v); drawStrip(); })),
+        chords ? toolRow('Left-handed diagrams', 'Mirror the chord boxes', toggle(prefs.get('leftHanded'), v => { prefs.set('leftHanded', v); drawStrip(); })) : null,
         (tr || vs().capo != null || vs().fs || vs().simplify) ? button('Reset to the original', () => { setView({ tr: null, capo: null, fs: null, simplify: null }); draw(); }, { cls: 'btn-ghost' }) : null);
     };
     draw();
@@ -584,7 +589,7 @@ export function view(route, { go, back }) {
       const g = groups.find(x => x.title.toLowerCase() === song.title.toLowerCase()) || groups[0];
       if (!g) { d.set(h('p', {}, 'Nothing found.')); return; }
       d.set(h('div', { class: 'set-list' }, g.versions.filter(v => v.type !== 'Pro').map(v => menuRow(v.url === song.src?.url ? 'check' : 'note',
-        `${v.type} · version ${v.version}`, `★ ${v.rating.toFixed(1)} from ${v.votes} votes${v.url === song.src?.url ? ' · this one' : ''}`,
+        `${versionKind(v)} · version ${v.version}`, `★ ${v.rating.toFixed(1)} from ${v.votes} votes${v.url === song.src?.url ? ' · this one' : ''}`,
         async () => {
           if (v.url === song.src?.url) { d.close(); return; }
           d.set(h('div', { class: 'row' }, h('span', { class: 'spinner' }), 'Loading…'));

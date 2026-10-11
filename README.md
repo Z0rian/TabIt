@@ -1,7 +1,8 @@
 # TabIt
 
-A guitar songbook: chords over lyrics from Ultimate Guitar, every chord shape,
-autoscroll, transpose and capo, a tuner, setlists. No ads. Works offline.
+A guitar songbook: chords over lyrics and tabs from Ultimate Guitar, every
+chord shape, autoscroll, transpose and capo, a tuner, setlists. No ads. Works
+offline.
 Live at **https://z0rian.github.io/TabIt/**. Add it to the home screen
 (Safari → Share → Add to Home Screen) and it runs like an app.
 
@@ -10,7 +11,8 @@ Live at **https://z0rian.github.io/TabIt/**. Add it to the home screen
 - **Library**: favorites, recently played (on any device), by artist, setlists,
   album covers (found by themselves, from Ultimate Guitar or Apple's catalog).
   One search box looks through your songs first, then Ultimate Guitar with
-  every version of a song.
+  every version of a song, chords and tabs (*All · Chords · Tabs*, like
+  Ultimate Guitar's own search).
 - **Songs**: each chord sits exactly over the syllable it belongs to, at any
   width, zoom or font. Tap a chord to swipe through its shapes (the tab
   author's own first) and hear it. Transpose with the button next to the key
@@ -19,6 +21,13 @@ Live at **https://z0rian.github.io/TabIt/**. Add it to the home screen
   pinch or Ctrl+wheel to zoom. Notes per song. The tab author's strumming
   patterns, with the count under each stroke, and Play strums them in time on
   the song's first chord.
+- **Tabs** (banjo-style rolls, fiddle tunes, flatpicking solos): each staff
+  as written where it fits; on a phone a little smaller when that keeps it
+  on one row, otherwise cut into rows of about equal length at bar lines,
+  with the string names at the start of every row. Never through a fret
+  number or a chord name. Headings ("Part A", "Lick 1") and notes like "R1"
+  or "x2" go above their staff. Type "tab" in the library search to see
+  just your tabs.
 - **Autoscroll** paced by the song's length: from the YouTube video once
   you've played it there, otherwise estimated (most songs come out at 2 to
   3 minutes), at one steady speed from the song's first line. The slider
@@ -93,8 +102,10 @@ account there, then use it on your other devices; they get them back.
 TabIt reaches Ultimate Guitar through a Cloudflare Worker,
 `ug-proxy.zorian.workers.dev`. The version in `ug-proxy/worker.js` also
 returns each tab's capo, key, tuning, chord shapes, strumming and tempo, the
-version numbers, and YouTube video lengths. The app works with the old one,
-but some songs then come in without their capo. To update it: Cloudflare
+version numbers, which part of a song a tab is of (Ultimate Guitar numbers an
+intro tab's versions apart from the whole song's), and YouTube video lengths.
+The app works with older ones, but some songs then come in without their capo,
+and two tabs can show the same version number. To update it: Cloudflare
 dashboard → Workers & Pages → `ug-proxy` → *Edit code* → paste
 `ug-proxy/worker.js` → *Deploy*. *Settings → About → Check* says which one is
 running.
@@ -109,6 +120,8 @@ python scripts/serve.py               # http://127.0.0.1:8090, ?mock = fake GitH
 python scripts/build.py               # stamp sw.js before committing (tests check it)
 python tests/run_unit.py              # unit tests in WebKit and Edge
 python tests/e2e_align.py [--full]    # chord placement on 11 phones/tablets/laptops
+python tests/e2e_tabs.py              # tablature laid out on phones, tablets, laptops
+python tests/e2e_tab_song.py          # search, show only tabs, open, autoscroll and save one
 python tests/e2e_sync.py              # owner and a friend's two devices, through a fake GitHub
 python tests/e2e_songbook_upgrade.py ../tabit-prev   # from 2.0 (git worktree add ../tabit-prev 8ce0f1c)
 python tests/e2e_offline.py           # starts with no network
@@ -119,6 +132,7 @@ python tests/e2e_tuner.py             # the tuner with a known signal
 
 The alignment and corpus tests use your own library as test data
 (`tests/fetch_corpus.py` puts it in `tests/corpus/`, which is never committed:
-it's copyrighted song text). Playwright for Python and its WebKit browser are
+it's copyrighted song text); the tab tests, bluegrass tabs from Ultimate Guitar
+(`tests/fetch_tabs.py`, into `tests/corpus/tabs/`). Playwright for Python and its WebKit browser are
 needed (`python -m playwright install webkit`); Edge stands in for Chrome.
 See `CLAUDE.md` for how the code fits together.

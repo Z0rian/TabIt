@@ -19,7 +19,7 @@ test('worker: search keeps versions, key, cover', async () => {
   ] });
   const r = await withFetch(html, () => search('song'));
   eq(r.body.results.length, 1);
-  deepEq(r.body.results[0], { title: 'Song', artist: 'Band', type: 'Chords', rating: 4.82, votes: 50, url: 'https://tabs.ultimate-guitar.com/tab/band/song-chords-1', version: 2, id: 1, key: 'G', difficulty: 'novice', cover: 'https://x/c.jpg' });
+  deepEq(r.body.results[0], { title: 'Song', artist: 'Band', type: 'Chords', part: '', rating: 4.82, votes: 50, url: 'https://tabs.ultimate-guitar.com/tab/band/song-chords-1', version: 2, id: 1, key: 'G', difficulty: 'novice', cover: 'https://x/c.jpg' });
   eq((await search('')).status, 400);
 });
 

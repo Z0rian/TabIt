@@ -359,7 +359,7 @@ function classify(line, group) {
 }
 
 function tabRow(r) {
-  if (r.kind === 'tabline') return { text: r.text, chords: r.chords || [] };
+  if (r.kind === 'tabline') return { text: r.text, chords: r.chords || [], staff: true };
   if (r.kind === 'chords') {
     // chord names above a staff: keep their columns
     const chords = r.items.filter(x => x.chord).map(x => ({ col: x.col, name: x.chord }));
@@ -403,6 +403,16 @@ export function snapAnchors(lyric, chords) {
   out.sort((a, b) => a.at - b.at);
   for (let i = 1; i < out.length; i++) if (out[i].at <= out[i - 1].at) out[i].at = out[i - 1].at + 1;
   return out;
+}
+
+// 'tab' when most of a song is tablature (an intro riff in a chord sheet isn't).
+export function guessKind(doc) {
+  let tab = 0, other = 0;
+  for (const b of doc.blocks) {
+    if (b.type === 'tab') tab += b.lines.length;
+    else if (b.type === 'pair' || b.type === 'lyric' || b.type === 'chords') other++;
+  }
+  return tab > other ? 'tab' : 'chords';
 }
 
 function uniqueChords(blocks) {

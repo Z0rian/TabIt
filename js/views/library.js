@@ -4,7 +4,7 @@
 import { h, icon, iconButton, button, toast, swipeToDelete, seg, drawer, promptSheet, confirmSheet, relTime, initials, debounce, fill } from '../ui.js';
 import { store, subscribe, dispatch, undoable, signedIn } from '../store.js';
 import { searchSongs, sortSongs, groupByArtist, SORTS, newId, findDuplicate } from '../model.js';
-import { searchUG, groupResults, fetchTab, songFromTab } from '../ug.js';
+import { searchUG, groupResults, fetchTab, songFromTab, isTabType, versionKind, score } from '../ug.js';
 import { prefs } from '../prefs.js';
 import { session } from '../session.js';
 import { syncPill } from './common.js';
@@ -113,7 +113,19 @@ export function view(route, { go }) {
     } else if (!ug.groups.length) {
       parts.push(h('div', { class: 'empty' }, h('p', {}, 'Nothing on Ultimate Guitar for that. Try the artist and song name.')));
     } else {
-      parts.push(h('div', { class: 'list' }, ug.groups.slice(0, 30).map(g => resultRow(g, { go }))));
+      // like Ultimate Guitar's own search: everything, or only chords, or only tabs
+      const has = t => ug.groups.some(g => g.versions.some(v => kindOf(v) === t));
+      const both = has('Chords') && has('Tabs');
+      const type = both ? prefs.get('ugType') || 'all' : 'all';
+      if (both) {
+        parts.push(h('div', { class: 'ug-types' }, seg([['all', 'All'], ['Chords', 'Chords'], ['Tabs', 'Tabs']], type, v => { prefs.set('ugType', v); draw(); }, { label: 'Show' })));
+      }
+      const groups = ug.groups.filter(g => g.versions.some(v => shows(v, type)));
+      const proOnly = ug.groups.filter(g => g.versions.every(v => v.type === 'Pro')).length;
+      parts.push(groups.length
+        ? h('div', { class: 'list' }, groups.slice(0, 30).map(g => resultRow(g, { go, type })))
+        : h('div', { class: 'empty' }, h('p', {}, type === 'Tabs' ? 'No tabs for that on Ultimate Guitar.' : 'No chords for that on Ultimate Guitar.')));
+      if (proOnly) parts.push(h('p', { class: 'hint ug-pro' }, `${proOnly === 1 ? 'One more is' : `${proOnly} more are`} only on Ultimate Guitar as Guitar Pro files, which TabIt can’t show.`));
     }
     fill(body, ...parts);
   }
@@ -174,7 +186,7 @@ export function songRow(s, { go, artist = true, onOpen } = {}) {
     type: 'button', class: `icon-btn ${s.fav ? 'fav' : ''}`, 'aria-label': s.fav ? 'Remove from favorites' : 'Add to favorites', 'aria-pressed': String(!!s.fav),
     onClick: e => { e.stopPropagation(); dispatch({ t: 'set', id: s.id, set: { fav: s.fav ? null : true } }); },
   }, icon(s.fav ? 'heartFill' : 'heart'));
-  const sub = [artist ? s.artist : null, s.played ? `played ${relTime(s.played)}` : null].filter(Boolean).join(' · ');
+  const sub = [artist ? s.artist : null, s.kind === 'tab' ? 'Tab' : null, s.played ? `played ${relTime(s.played)}` : null].filter(Boolean).join(' · ');
   const row = h('div', { class: 'row', role: 'link', tabindex: '0', onClick: () => (onOpen ? onOpen(s) : go(`#/song/${s.id}`)), onKeydown: e => { if (e.key === 'Enter') (onOpen ? onOpen(s) : go(`#/song/${s.id}`)); } },
     art,
     h('div', { class: 'row-main' }, h('div', { class: 'row-title' }, s.title), h('div', { class: 'row-sub' }, sub || ' ')),
@@ -188,11 +200,20 @@ export function songRow(s, { go, artist = true, onOpen } = {}) {
   });
 }
 
-function resultRow(g, { go }) {
+const kindOf = v => (isTabType(v.type) ? 'Tabs' : v.type);
+const shows = (v, type) => v.type !== 'Pro' && (type === 'all' || kindOf(v) === type);
+
+function resultRow(g, { go, type = 'all' }) {
   const inLib = Object.values(store.lib.songs).filter(s => s.src?.url && g.versions.some(v => v.url === s.src.url));
-  const chords = g.versions.filter(v => v.type === 'Chords');
-  const shown = (chords.length ? chords : g.versions).slice(0, 8);
-  const best = g.best;
+  const visible = g.versions.filter(v => shows(v, type));
+  const chords = visible.filter(v => v.type === 'Chords');
+  const tabs = visible.filter(v => isTabType(v.type));
+  const mixed = chords.length > 0 && tabs.length > 0;
+  const shown = mixed ? [...chords.slice(0, 6), ...tabs.slice(0, 6)] : visible.slice(0, 10);
+  const best = visible.includes(g.best) ? g.best : visible.reduce((a, b) => (score(b) > score(a) ? b : a));
+  // "Ver 2" when they're all chords of the whole song; else "Chords 2", "Tab 3", "Intro tab 1"
+  const named = mixed || visible.some(v => isTabType(v.type) || v.part);
+  const label = v => (named ? `${versionKind(v)} ${v.version}` : `Ver ${v.version}`);
   return h('div', { class: 'row', style: { alignItems: 'flex-start' } },
     h('div', { class: 'row-art', 'aria-hidden': 'true' }, best.cover ? h('img', { src: best.cover, alt: '', loading: 'lazy' }) : initials(g.artist)),
     h('div', { class: 'row-main' },
@@ -200,9 +221,9 @@ function resultRow(g, { go }) {
       h('div', { class: 'row-sub' }, g.artist, inLib.length ? ' · in your library' : ''),
       h('div', { class: 'result-ver' }, shown.map(v => h('button', {
         type: 'button', class: `ver-btn ${v === best ? 'best' : ''}`,
-        'aria-label': `${v.type} version ${v.version}, rated ${v.rating.toFixed(1)} by ${v.votes}`,
+        'aria-label': `${versionKind(v)} version ${v.version}, rated ${v.rating.toFixed(1)} by ${v.votes}`,
         onClick: () => openResult(v, g, { go }),
-      }, `${v.type === 'Chords' ? 'Ver' : v.type} ${v.version}`, v.votes ? h('span', { class: 'stars' }, `★${v.rating.toFixed(1)}`) : null, v.votes ? h('span', { class: 'votes' }, compact(v.votes)) : null)))));
+      }, label(v), v.votes ? h('span', { class: 'stars' }, `★${v.rating.toFixed(1)}`) : null, v.votes ? h('span', { class: 'votes' }, compact(v.votes)) : null)))));
 }
 
 const compact = n => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
