@@ -118,7 +118,7 @@ def run(engine, device, base):
         before = page.evaluate('scrollY')
         # a finger drags the page back up (touch on the phone, wheel on the laptop)
         page.evaluate("dispatchEvent(new Event('touchstart')); scrollBy(0, -500)")
-        time.sleep(0.3)
+        time.sleep(0.6)  # (the finger rests a moment: it still holds the page)
         page.evaluate("scrollBy(0, -100); dispatchEvent(new Event('touchend'))")
         time.sleep(0.1)
         after_drag = page.evaluate('scrollY')

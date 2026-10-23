@@ -209,6 +209,11 @@ def run(engine, device, base, rec):
         # button as the button moving; it doesn't, see tests/e2e_deck.py for taps)
         page.get_by_role('button', name='Close video').click(force=True)
         check(page.locator('.yt').count() == 0, 'the player closes while the song plays')
+        time.sleep(0.5)
+        check(page.locator('.deck .play').get_attribute('aria-label') == 'Pause autoscroll', 'and the autoscroll goes on by itself')
+        page.evaluate('window.__fakePlayer.pauseVideo()')  # (a late word from the closed player changes nothing)
+        time.sleep(0.3)
+        check(page.locator('.deck .play').get_attribute('aria-label') == 'Pause autoscroll', 'even if the closed player says it stopped')
         if errors:
             raise AssertionError(errors)
         b.close()

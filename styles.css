@@ -423,6 +423,9 @@ button.chip-btn:active { transform: scale(0.97); }
   font: 600 13px/1 var(--font-ui); color: var(--ink); display: inline-flex; gap: 6px; align-items: center;
 }
 .ug-types { margin: 4px 0 10px; }
+/* following a video: the line it's at */
+.read-line { position: fixed; z-index: 4; width: 6px; height: 1.7em; margin-top: -0.85em; border-radius: 3px; background: var(--accent); opacity: 0; transition: opacity .3s; pointer-events: none; }
+.read-line.on { opacity: .9; }
 .ug-pro { margin: 10px 4px 0; }
 .ver-btn .stars { color: var(--accent); font-family: var(--font-mono); font-size: 12px; }
 .ver-btn .votes { color: var(--ink-3); font-weight: 500; }

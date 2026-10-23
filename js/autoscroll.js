@@ -11,6 +11,9 @@
 //
 // Scrolling by hand while it plays is fine: it carries on from wherever you
 // leave it.
+//
+// Following a YouTube video, the video says how far into the song it is (see
+// "following a video" below).
 
 export const DEFAULT_SECONDS_PER_LINE = 4;
 const MIN_EST = 120;
@@ -47,13 +50,112 @@ export function fractionAt(map, y) {
   return map.end > map.start ? clamp01((y - map.start) / (map.end - map.start)) : 0;
 }
 
+// ---------- following a video ----------
+//
+// Where the moment the video is at is on the page. The song's parts share its
+// time by their height, as autoscroll does, except tablature, which gets its
+// share by its length: a staff is a line of music however many rows it takes
+// on a phone. And wherever you've put the music by hand while the video
+// played (a sync point: this second of the video is this line), it goes
+// through there, in a straight line from one to the next.
+
+// The music on the page, after the author's notes: [{ i (its block), top, h,
+// w (its weight), tab }] → with s (where its time starts) and e (its share), in
+// the pixels of an ordinary line. (A tab gets as many of them per unit of
+// playing time as the other lines have.)
+export function weigh(parts) {
+  const sum = (list, k) => list.reduce((a, p) => a + p[k], 0);
+  const lines = parts.filter(p => !p.tab && p.w > 0);
+  const tabs = parts.filter(p => p.tab && p.w > 0);
+  const perW = sum(lines, 'w') > 0 ? sum(lines, 'h') / sum(lines, 'w') : sum(tabs, 'h') / Math.max(1e-9, sum(tabs, 'w'));
+  let E = 0;
+  const out = parts.map(p => {
+    const e = p.tab ? p.w * perW : p.h;
+    const q = { ...p, s: E, e };
+    E += e;
+    return q;
+  });
+  return { parts: out, E };
+}
+
+export function followMap(sheet) {
+  const blocks = [...sheet.children];
+  const first = Math.max(0, blocks.findIndex(b => !b.classList.contains('pre')));
+  const last = blocks.findLastIndex(b => !b.classList.contains('gap'));
+  const parts = [];
+  for (let i = first; i <= last; i++) {
+    const r = blocks[i].getBoundingClientRect();
+    parts.push({ i, top: r.top + scrollY, h: r.height, w: +blocks[i].dataset.w || 0, tab: blocks[i].classList.contains('tab') });
+  }
+  return weigh(parts);
+}
+
+// position in the song's time (0..E) → y on the page, and back
+export function yOfS(map, s) {
+  const { parts, E } = map;
+  if (!parts.length) return 0;
+  if (s <= 0) return parts[0].top;
+  if (s >= E) { const p = parts.at(-1); return p.top + p.h; }
+  const p = parts.find(q => s < q.s + q.e) || parts.at(-1);
+  return p.top + (p.e > 0 ? (s - p.s) / p.e : 0) * p.h;
+}
+export function sOfY(map, y) {
+  const { parts, E } = map;
+  if (!parts.length || y <= parts[0].top) return 0;
+  for (const p of parts) {
+    if (y < p.top) return p.s; // (in the space between two parts)
+    if (y < p.top + p.h) return p.s + (p.h > 0 ? (y - p.top) / p.h : 0) * p.e;
+  }
+  return E;
+}
+
+// A place in the song that doesn't depend on the screen: a block, and how far into it.
+export function placeAt(map, y) {
+  const { parts } = map;
+  if (!parts.length) return { b: 0, f: 0 };
+  const p = parts.find(q => y < q.top + q.h) || parts.at(-1);
+  return { b: p.i, f: Math.round(clamp01(p.h > 0 ? (y - p.top) / p.h : 0) * 1000) / 1000 };
+}
+function sOfPlace(map, { b, f }) {
+  const { parts, E } = map;
+  if (!parts.length || b < parts[0].i) return 0;
+  const p = parts.find(q => q.i === b);
+  if (!p) return b > parts.at(-1).i ? E : parts.find(q => q.i > b)?.s ?? E;
+  return p.s + clamp01(f) * p.e;
+}
+
+// Seconds of the video → position in the song's time, through the sync
+// points: [{ t, s }] from (0, 0) to (d, E), each one further on in both.
+export function followCurve(map, d, points = []) {
+  const curve = [{ t: 0, s: 0 }];
+  for (const pt of [...points].sort((a, b) => a.t - b.t)) {
+    const s = sOfPlace(map, pt);
+    if (pt.t > 0 && pt.t < d && s >= curve.at(-1).s && pt.t > curve.at(-1).t) curve.push({ t: pt.t, s });
+  }
+  curve.push({ t: d, s: Math.max(map.E, curve.at(-1).s) });
+  return curve;
+}
+export function sAtTime(curve, t) {
+  if (t <= curve[0].t) return curve[0].s;
+  for (let k = 1; k < curve.length; k++) {
+    const a = curve[k - 1], b = curve[k];
+    if (t <= b.t) return a.s + ((t - a.t) / Math.max(1e-9, b.t - a.t)) * (b.s - a.s);
+  }
+  return curve.at(-1).s;
+}
+
 export class AutoScroll {
-  // sheet: the rendered .sheet; duration: () => seconds; onChange(state)
-  constructor({ sheet, duration, onChange, follow }) {
+  // sheet: the rendered .sheet; duration: () => seconds; onChange(state);
+  // video: () => { t, d, points } of a playing video it follows, or null
+  // (points: where it was synced to the song, see followCurve);
+  // onSync({ t, b, f }): moved by hand while following, the music is here
+  constructor({ sheet, duration, onChange, video, onSync }) {
     this.sheet = sheet;
     this.duration = duration;
     this.onChange = onChange || (() => {});
-    this.follow = follow || null; // () => fraction from a playing video, or null
+    this.video = video || null;
+    this.onSync = onSync || null;
+    this.v = null; // the video, while it's being followed
     this.speed = 1;
     this.playing = false;
     this.t = 0; // seconds of song played
@@ -66,12 +168,16 @@ export class AutoScroll {
     this.onUser = this.onUser.bind(this);
     this.onScroll = this.onScroll.bind(this);
     this.onTouchEnd = this.onTouchEnd.bind(this);
+    // (a finger on the screen holds it, however still it is, until it lifts)
+    this.touching = false;
+    this.onTouchStart = () => { this.touching = true; this.onUser(); clearTimeout(this.idleTimer); };
     addEventListener('wheel', this.onUser, { passive: true });
-    addEventListener('touchstart', this.onUser, { passive: true });
+    addEventListener('touchstart', this.onTouchStart, { passive: true });
     addEventListener('touchend', this.onTouchEnd, { passive: true });
+    addEventListener('touchcancel', this.onTouchEnd, { passive: true });
     addEventListener('keydown', this.onKey = e => { if (['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End'].includes(e.key)) this.onUser(); });
     addEventListener('scroll', this.onScroll, { passive: true });
-    this.ro = new ResizeObserver(() => { this.map = null; });
+    this.ro = new ResizeObserver(() => { this.map = null; this.fmap = null; });
     this.ro.observe(sheet);
   }
 
@@ -80,7 +186,7 @@ export class AutoScroll {
   get remaining() { return Math.max(0, (this.duration() - this.t) / this.speed); }
 
   state() {
-    return { playing: this.playing, speed: this.speed, t: this.t, duration: this.duration(), fraction: this.fraction, remaining: this.remaining };
+    return { playing: this.playing, speed: this.speed, t: this.t, duration: this.duration(), fraction: this.fraction, remaining: this.remaining, following: !!this.v };
   }
 
   ensureMap() {
@@ -88,10 +194,19 @@ export class AutoScroll {
     return this.map;
   }
 
+  // the video's moment → its place on the page (the curve made again when the
+  // layout, the video's length or its sync points change)
+  followY(v) {
+    if (!this.fmap) this.fmap = followMap(this.sheet);
+    if (this.curveFor?.map !== this.fmap || this.curveFor.d !== v.d || this.curveFor.points !== v.points) {
+      this.curveFor = { map: this.fmap, d: v.d, points: v.points, curve: followCurve(this.fmap, v.d, v.points) };
+    }
+    return yOfS(this.fmap, sAtTime(this.curveFor.curve, v.t));
+  }
+
   // Where the window should be for the current song time.
   target() {
-    const map = this.ensureMap();
-    const y = yAt(map, this.fraction) - innerHeight * READ_LINE;
+    const y = (this.v ? this.followY(this.v) : yAt(this.ensureMap(), this.fraction)) - innerHeight * READ_LINE;
     const max = document.documentElement.scrollHeight - innerHeight;
     return Math.max(0, Math.min(max, y));
   }
@@ -137,8 +252,8 @@ export class AutoScroll {
     const dt = Math.min(0.3, (now - this.last) / 1000);
     this.last = now;
     if (!this.hold) {
-      const f = this.follow?.();
-      if (f !== null && f !== undefined) this.t = f * this.duration();
+      this.v = this.video?.() || null;
+      if (this.v) this.t = this.v.t;
       else this.t += dt * this.speed;
       const want = this.target();
       // glide into place instead of jumping (e.g. right after pressing play)
@@ -196,13 +311,14 @@ export class AutoScroll {
   }
 
   onTouchEnd() {
+    this.touching = false;
     if (!this.playing) return;
     clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => this.release(), 250);
   }
 
   onScroll() {
-    if (!this.playing || !this.hold) return;
+    if (!this.playing || !this.hold || this.touching) return;
     // momentum scrolling: keep holding until it settles
     clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => this.release(), 220);
@@ -210,7 +326,15 @@ export class AutoScroll {
 
   release() {
     this.hold = false;
-    this.syncFromScroll();
+    const v = this.video?.();
+    if (v && this.onSync) {
+      // moved by hand while following the video: the music is here now, and
+      // it follows on from here (a touch that hardly moved it doesn't count)
+      if (Math.abs(scrollY - this.pos) >= 30) {
+        if (!this.fmap) this.fmap = followMap(this.sheet);
+        this.onSync({ t: v.t, ...placeAt(this.fmap, scrollY + innerHeight * READ_LINE) });
+      }
+    } else this.syncFromScroll();
     this.pos = scrollY;
     this.last = performance.now();
   }
@@ -222,15 +346,16 @@ export class AutoScroll {
     this.pos = scrollY;
   }
 
-  invalidate() { this.map = null; }
+  invalidate() { this.map = null; this.fmap = null; }
 
   destroy() {
     this.pause();
     this.unshift();
     clearTimeout(this.idleTimer);
     removeEventListener('wheel', this.onUser);
-    removeEventListener('touchstart', this.onUser);
+    removeEventListener('touchstart', this.onTouchStart);
     removeEventListener('touchend', this.onTouchEnd);
+    removeEventListener('touchcancel', this.onTouchEnd);
     removeEventListener('keydown', this.onKey);
     removeEventListener('scroll', this.onScroll);
     this.ro.disconnect();

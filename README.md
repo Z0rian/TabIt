@@ -34,7 +34,11 @@ Live at **https://z0rian.github.io/TabIt/**. Add it to the home screen
   you've played it there, otherwise estimated (most songs come out at 2 to
   3 minutes), at one steady speed from the song's first line. The slider
   makes it faster or slower; scroll by hand and it carries on from there.
-  With *Follow the video* on, it scrolls along with the YouTube player. Swipe
+  With *Follow the video* on, it scrolls along with the YouTube player (a
+  tab gets its time by its length, not by how tall it is), with a marker at
+  the left on the line the video is at. If it's ahead or behind, scroll the
+  part you hear to the marker: it follows on from there, and remembers it for
+  that song and video (*Song length → Forget where it's synced*). Swipe
   the bar right (or tap its grip) to tuck it into the corner as just
   play/pause.
 - **Chords** tab: any chord you can type, every shape, in any tuning.
@@ -125,6 +129,7 @@ python tests/e2e_align.py [--full]    # chord placement on 11 phones/tablets/lap
 python tests/e2e_tabs.py              # tablature laid out on phones, tablets, laptops
 python tests/e2e_tab_song.py          # search, show only tabs, open, autoscroll and save one
 python tests/e2e_library_nav.py       # a search as a step of its own (Back, the Library tab), shuffle
+python tests/e2e_follow.py            # following a video: tabs by length, hand corrections that stick
 python tests/e2e_sync.py              # owner and a friend's two devices, through a fake GitHub
 python tests/e2e_songbook_upgrade.py ../tabit-prev   # from 2.0 (git worktree add ../tabit-prev 8ce0f1c)
 python tests/e2e_offline.py           # starts with no network

@@ -12,6 +12,7 @@ export const files = [
   'worker.test.js',
   'sheet.test.js',
   'tabs.test.js',
+  'follow.test.js',
   'strum.test.js',
   'covers.test.js',
 ];

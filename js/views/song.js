@@ -8,7 +8,7 @@ import { newId } from '../model.js';
 import { parseSong, toPlainText } from '../parse.js';
 import { renderSheet, watchSheet } from '../sheet.js';
 import { transposeChord, transposeKey, keyPrefersFlats, simplifyChord, detectKey } from '../theory.js';
-import { AutoScroll, WakeLock, estimateDuration } from '../autoscroll.js';
+import { AutoScroll, WakeLock, estimateDuration, READ_LINE } from '../autoscroll.js';
 import { Player } from '../youtube.js';
 import { findVideo, videoIdFrom, searchUG, groupResults, fetchTab, songFromTab, versionKind } from '../ug.js';
 import { prefs, fontSize } from '../prefs.js';
@@ -317,16 +317,62 @@ export function view(route, { go, back }) {
     if (scroller) return scroller;
     scroller = new AutoScroll({
       sheet, duration,
-      follow: () => (prefs.get('followVideo') && player?.playing() && player.duration() ? player.time() / player.duration() : null),
+      video: () => (prefs.get('followVideo') && player?.playing() && player.duration() ? { t: player.time(), d: player.duration(), points: syncPoints() } : null),
+      onSync: addSyncPoint,
       onChange: st => {
         deck.update(st);
         if (st.playing) { wake.acquire(); root.classList.add('playing'); }
         else { root.classList.remove('playing'); if (!prefs.get('keepAwake')) wake.release(); }
+        showReadLine(st.playing && st.following);
         if (st.ended) ended();
       },
     });
     scroller.setSpeed(vs().speed || 1);
     return scroller;
+  }
+
+  // ---------- following the video: where it's at in the song ----------
+  // Moved by hand while the video plays (the line you hear put at the marker),
+  // the song follows on from there: "this second of the video is this line",
+  // remembered for this song and video ([seconds, block, how far into it]).
+  // One a few seconds from another takes its place, and one that's out of
+  // order with the others (further on in the song, earlier in the video)
+  // pushes those out.
+  let syncMemo = null;
+  const contentHash = () => {
+    let x = 0x811c9dc5;
+    for (let k = 0; k < song.content.length; k++) x = Math.imul(x ^ song.content.charCodeAt(k), 0x01000193);
+    return (x >>> 0).toString(36);
+  };
+  function syncPoints() {
+    const s = vs().sync;
+    if (syncMemo && syncMemo.from === s) return syncMemo.points;
+    const ok = s && s.v === song.yt && s.h === contentHash() && Array.isArray(s.pts);
+    syncMemo = { from: s, points: ok ? s.pts.map(([t, b, f]) => ({ t, b, f })) : [] };
+    return syncMemo.points;
+  }
+  let syncedOnce = false;
+  function addSyncPoint({ t, b, f }) {
+    const at = b + f;
+    const kept = syncPoints().filter(p => Math.abs(p.t - t) > 8 && (p.t < t ? p.b + p.f <= at : p.b + p.f >= at));
+    const pts = [...kept, { t, b, f }].sort((x, y) => x.t - y.t).slice(-40).map(p => [Math.round(p.t * 10) / 10, p.b, p.f]);
+    setView({ sync: { v: song.yt, h: contentHash(), pts } }, { draw: false });
+    if (!syncedOnce) {
+      syncedOnce = true;
+      toast('It follows the video from here, and remembers it for this song.', { ms: 4500, action: 'Undo', onAction: () => setView({ sync: kept.length ? { v: song.yt, h: contentHash(), pts: kept.map(p => [p.t, p.b, p.f]) } : null }, { draw: false }) });
+    }
+  }
+  const forgetSync = () => setView({ sync: null }, { draw: false });
+
+  // the line the video is at, marked at the left (put the line you hear there)
+  const readLine = h('div', { class: 'read-line', 'aria-hidden': 'true' });
+  function showReadLine(on) {
+    if (on && !readLine.isConnected) document.body.append(readLine);
+    if (on && sheet) {
+      readLine.style.top = `${innerHeight * READ_LINE}px`;
+      readLine.style.left = `${Math.max(0, sheet.getBoundingClientRect().left - 12)}px`;
+    }
+    readLine.classList.toggle('on', !!on);
   }
 
   function ended() {
@@ -499,7 +545,9 @@ export function view(route, { go, back }) {
         h('div', { class: 'set-list' },
           menuRow('video', 'Use the YouTube video’s length', song.yt ? 'Opens the player once to read it' : 'Finds the song on YouTube first', () => { d.close(); toggleVideo(true); }),
           menuRow('wand', 'Estimate from the song', `${fmtTime(sheet ? estimateDuration([...sheet.children].map(b => +b.dataset.w || 0)) : 165)}, from the number of lines`, () => set(null, null))),
-        h('div', { class: 'tool-row' }, h('span', {}, 'Follow the video', h('small', {}, 'While it plays, the song scrolls with it')), toggle(prefs.get('followVideo'), v => prefs.set('followVideo', v))),
+        h('div', { class: 'tool-row' }, h('span', {}, 'Follow the video', h('small', {}, 'While it plays, the song scrolls with it. If it’s ahead or behind, scroll the part you hear to the marker on the left: it follows on from there, and remembers it.')), toggle(prefs.get('followVideo'), v => prefs.set('followVideo', v))),
+        syncPoints().length ? h('div', { class: 'set-list', style: { marginTop: '8px' } },
+          menuRow('repeat', 'Forget where it’s synced to the video', `${syncPoints().length} place${syncPoints().length === 1 ? '' : 's'} you’ve lined up`, () => { forgetSync(); d.close(); toast('It follows the video on its own again'); })) : null,
       ],
     });
   }
@@ -567,18 +615,22 @@ export function view(route, { go, back }) {
     dragBox(ytBox);
     player = new Player(frame, vid, {
       onDuration: d => setDuration(d),
-      onState: s => { if (s === 1 && prefs.get('followVideo')) { ensureScroller().play(); } },
+      onState: s => {
+        if (!prefs.get('followVideo') || !player) return;
+        if (s === 1) ensureScroller().play();
+        else if ((s === 2 || s === 0) && scroller?.playing) scroller.pause(); // (paused, or at its end)
+      },
       onError: () => toast('That video can’t be played here. Pick another in ⋯ → YouTube video.'),
     });
   }
 
   function closeVideo() {
-    const box = ytBox;
+    const box = ytBox, p = player;
     ytBox = null;
+    player = null; // (first: its stopping isn't the video being paused, the autoscroll goes on)
     box?.remove();
-    player?.pause(); // the sound stops at once, whatever happens next
-    player?.destroy();
-    player = null;
+    p?.pause(); // the sound stops at once, whatever happens next
+    p?.destroy();
   }
 
   async function chooseVideo() {
@@ -745,6 +797,7 @@ export function view(route, { go, back }) {
       strumEl?.destroy();
       stopWatch?.();
       scroller?.destroy();
+      readLine.remove();
       closeVideo();
       wake.release();
       removeEventListener('keydown', onKey);
