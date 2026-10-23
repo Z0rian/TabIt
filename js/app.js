@@ -36,21 +36,44 @@ export function parseRoute(hash = location.hash) {
 // The screens visited in this session, so "back" can tell whether there's an
 // in-app page to go back to (a song opened from a shared link has none).
 const visited = [location.hash || '#/'];
+let replacing = false;
 function track() {
   const h = location.hash || '#/';
+  if (replacing) { replacing = false; visited[visited.length - 1] = h; return; }
   if (visited.length > 1 && visited[visited.length - 2] === h) visited.pop();
   else if (visited.at(-1) !== h) visited.push(h);
 }
 
 export const go = (hash, { replace = false } = {}) => {
   if (location.hash === hash) return route();
-  if (replace) location.replace(hash);
+  if (replace) { replacing = true; location.replace(hash); }
   else location.hash = hash;
 };
 export const back = (fallback = '#/') => {
   if (visited.length > 1) history.back();
   else go(fallback, { replace: true });
 };
+
+// A new address for what's on screen already (a search being typed): push
+// makes it a step that Back undoes.
+export function setHash(hash, { push = false } = {}) {
+  if (location.hash === hash) return;
+  if (push) { history.pushState(null, '', hash); visited.push(hash); }
+  else { history.replaceState(null, '', hash); visited[visited.length - 1] = hash; }
+}
+
+// Back to `hash` if it's the step before this one, else straight there.
+export const backTo = hash => (visited.at(-2) === hash ? history.back() : go(hash, { replace: true }));
+
+// Back one step to what's on screen already (the search just cleared): the
+// address changes, the screen isn't drawn again.
+let quiet = 0;
+export function quietBack(hash) {
+  if (visited.at(-2) !== hash) { setHash(hash); return; }
+  clearTimeout(quiet);
+  quiet = setTimeout(() => { quiet = 0; }, 1000);
+  history.back();
+}
 
 let current = null;
 let routeSeq = 0;
@@ -63,7 +86,8 @@ function drawTabs(active) {
     h('div', { class: 'tab-brand' }, h('img', { src: 'icons/icon-192.png', alt: 'TabIt' })),
     ...TABS.map(([name, label, ic, href]) => h('a', {
       class: 'tab-btn', href, 'aria-current': name === active ? 'page' : undefined,
-      onClick: e => { if (name === active && name === 'library') { e.preventDefault(); scrollTo({ top: 0, behavior: 'smooth' }); } },
+      // the tab of the screen that's showing: the screen decides (the library leaves a search, or goes to the top)
+      onClick: e => { if (name === active && current?.tabAgain) { e.preventDefault(); current.tabAgain(); } },
     }, icon(ic), h('span', {}, label))));
 }
 
@@ -73,7 +97,7 @@ async function route() {
   const mod = await VIEWS[r.name]();
   if (seq !== routeSeq) return; // a newer navigation won
   const prev = current;
-  const view = await mod.view(r, { go, back, route });
+  const view = await mod.view(r, { go, back, route, setHash, backTo, quietBack });
   if (seq !== routeSeq) { view.destroy?.(); return; }
   prev?.destroy?.();
   current = view;
@@ -107,7 +131,11 @@ async function boot() {
   addEventListener('tabit-storage-error', () => toast('This device’s storage is full or not working, so your latest changes may not be kept after closing TabIt. Free up some space, or export a backup in Settings.', { ms: 12000 }));
   appEl.append(tabbar, viewEl);
   document.body.prepend(appEl); // under the loading screen
-  addEventListener('hashchange', () => { track(); route(); });
+  addEventListener('hashchange', () => {
+    track();
+    if (quiet) { clearTimeout(quiet); quiet = 0; return; }
+    route();
+  });
   await route();
   hideSplash();
   store.maybePull(0);

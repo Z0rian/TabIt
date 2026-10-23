@@ -12,7 +12,9 @@ Live at **https://z0rian.github.io/TabIt/**. Add it to the home screen
   album covers (found by themselves, from Ultimate Guitar or Apple's catalog).
   One search box looks through your songs first, then Ultimate Guitar with
   every version of a song, chords and tabs (*All · Chords · Tabs*, like
-  Ultimate Guitar's own search).
+  Ultimate Guitar's own search). Back from a song goes back to its search;
+  Back again, or the Library tab, leaves the search. *Shuffle* on the
+  favorites plays them in random order, with next and previous in the bar.
 - **Songs**: each chord sits exactly over the syllable it belongs to, at any
   width, zoom or font. Tap a chord to swipe through its shapes (the tab
   author's own first) and hear it. Transpose with the button next to the key
@@ -122,6 +124,7 @@ python tests/run_unit.py              # unit tests in WebKit and Edge
 python tests/e2e_align.py [--full]    # chord placement on 11 phones/tablets/laptops
 python tests/e2e_tabs.py              # tablature laid out on phones, tablets, laptops
 python tests/e2e_tab_song.py          # search, show only tabs, open, autoscroll and save one
+python tests/e2e_library_nav.py       # a search as a step of its own (Back, the Library tab), shuffle
 python tests/e2e_sync.py              # owner and a friend's two devices, through a fake GitHub
 python tests/e2e_songbook_upgrade.py ../tabit-prev   # from 2.0 (git worktree add ../tabit-prev 8ce0f1c)
 python tests/e2e_offline.py           # starts with no network

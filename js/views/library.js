@@ -3,7 +3,7 @@
 
 import { h, icon, iconButton, button, toast, swipeToDelete, seg, drawer, promptSheet, confirmSheet, relTime, initials, debounce, fill } from '../ui.js';
 import { store, subscribe, dispatch, undoable, signedIn } from '../store.js';
-import { searchSongs, sortSongs, groupByArtist, SORTS, newId, findDuplicate } from '../model.js';
+import { searchSongs, sortSongs, groupByArtist, SORTS, newId, findDuplicate, shuffled } from '../model.js';
 import { searchUG, groupResults, fetchTab, songFromTab, isTabType, versionKind, score } from '../ug.js';
 import { prefs } from '../prefs.js';
 import { session } from '../session.js';
@@ -12,14 +12,18 @@ import { coverOf } from '../covers.js';
 
 const FILTERS = [['all', 'All'], ['fav', 'Favorites'], ['recent', 'Recent'], ['artists', 'Artists'], ['lists', 'Setlists']];
 
-export function view(route, { go }) {
+export function view(route, { go, setHash, backTo, quietBack }) {
   const listId = route.query.get('list');
   if (listId) return setlistView(listId, { go });
 
   let filter = prefs.get('filter');
   let sort = prefs.get('sort');
-  let q = session.query || '';
+  // The search is in the address (#/?q=…), as a step of its own: Back from a
+  // song goes back to its results, Back again (or the Library tab) leaves it.
+  let q = route.query.get('q') || '';
+  let searching = route.query.has('q');
   let ugCtrl = null;
+  const scrollKey = () => (q.trim() ? `q:${q.trim()}` : 'library');
 
   const count = h('small', {});
   const head = h('header', { class: 'page-head' },
@@ -32,7 +36,15 @@ export function view(route, { go }) {
     // (song titles aren't words to correct)
     'aria-label': 'Search', autocomplete: 'off', autocorrect: 'off', autocapitalize: 'off', spellcheck: 'false',
   });
-  const clear = iconButton('close', 'Clear search', () => { input.value = ''; q = ''; session.query = ''; session.ug = null; draw(); input.focus(); }, { cls: 'clear' });
+  // (clearing it keeps the box ready for another search; the step goes, so Back doesn't stop at an empty one)
+  const clear = iconButton('close', 'Clear search', () => {
+    input.value = '';
+    q = '';
+    session.ug = null;
+    if (searching) { searching = false; quietBack('#/'); }
+    draw();
+    input.focus();
+  }, { cls: 'clear' });
   const search = h('div', { class: 'search' }, icon('search'), input, clear);
   const filterSeg = seg(FILTERS, filter, v => { filter = v; prefs.set('filter', v); draw(); }, { label: 'Show' });
   const sortBtn = iconButton('sort', 'Sort', () => sortMenu());
@@ -40,10 +52,13 @@ export function view(route, { go }) {
   const body = h('div', { class: 'lib-body' });
   const el = h('div', { class: 'page' }, head, tools, body);
 
-  const runLocal = debounce(() => { session.query = q; draw(); }, 80);
+  const runLocal = debounce(() => draw(), 80);
   input.addEventListener('input', () => {
     q = input.value;
     if (session.ug && session.ug.q !== q.trim()) session.ug = null;
+    const hash = `#/?q=${encodeURIComponent(q.trim())}`;
+    if (!searching && q.trim()) { searching = true; setHash(hash, { push: true }); }
+    else if (searching) setHash(hash);
     runLocal();
   });
   input.addEventListener('keydown', e => {
@@ -91,7 +106,8 @@ export function view(route, { go }) {
     else songs = sortSongs(songs, sort);
     const note = filter === 'fav' ? `${songs.length} favorite${songs.length === 1 ? '' : 's'}` : filter === 'recent' ? 'Recently played on any device' : SORTS[sort].label;
     fill(body, 
-      h('div', { class: 'lib-count' }, h('span', {}, note)),
+      h('div', { class: 'lib-count' }, h('span', {}, note),
+        filter === 'fav' && songs.length > 1 ? button('Shuffle', () => shufflePlay(songs, go), { cls: 'btn-small', iconName: 'shuffle' }) : null),
       songs.length ? h('div', { class: 'list' }, songs.map(s => songRow(s, { go }))) : h('div', { class: 'empty' }, h('p', {}, filter === 'fav' ? 'No favorites yet. Tap the heart on a song.' : 'Songs you open show up here.')),
     );
   }
@@ -174,10 +190,23 @@ export function view(route, { go }) {
   const unsub = subscribe(() => { if (!q.trim() || !session.ug?.loading) draw(); });
   draw();
   return {
-    el, title: 'Library', tab: 'library', scrollY: session.libraryScroll,
-    mounted() { if (route.query.has('search')) input.focus(); },
-    destroy() { session.libraryScroll = scrollY; unsub(); ugCtrl?.abort(); },
+    el, title: 'Library', tab: 'library', scrollY: session.scroll[scrollKey()] || 0,
+    mounted() { if (route.query.has('search')) { setHash('#/'); input.focus(); } },
+    tabAgain() {
+      if (searching || q.trim()) { input.blur(); backTo('#/'); return; }
+      scrollTo({ top: 0, behavior: 'smooth' });
+    },
+    destroy() { session.scroll[scrollKey()] = scrollY; unsub(); ugCtrl?.abort(); },
   };
+}
+
+// Favorites in random order, played through like a setlist.
+export function shufflePlay(songs, go) {
+  const ids = shuffled(songs.map(s => s.id));
+  if (!ids.length) return;
+  session.shuffle = ids;
+  try { sessionStorage.setItem('tabit.shuffle', JSON.stringify(ids)); } catch { /* still in memory */ }
+  go(`#/song/${ids[0]}?list=shuffle&i=0`);
 }
 
 export function songRow(s, { go, artist = true, onOpen } = {}) {

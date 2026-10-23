@@ -30,6 +30,17 @@ export function view(route, { go, back }) {
   }
   const listId = route.query.get('list');
   const listIndex = +route.query.get('i') || 0;
+  // what's being played through: a setlist, or the favorites shuffled
+  const isShuffle = listId === 'shuffle';
+  const playList = () => {
+    if (!isShuffle) return store.lib.setlists[listId] || null;
+    if (!session.shuffle) { try { session.shuffle = JSON.parse(sessionStorage.getItem('tabit.shuffle')); } catch { /* none */ } }
+    return Array.isArray(session.shuffle) ? { id: 'shuffle', songs: session.shuffle } : null;
+  };
+  // the next (or previous) song in it that's still in the library
+  const step = (l, d) => { for (let k = listIndex + d; k >= 0 && k < l.songs.length; k += d) if (store.lib.songs[l.songs[k]]) return k; return -1; };
+  // (moving through it replaces this song: Back leaves the setlist or the shuffle, not one song)
+  const playAt = (l, k, auto = false) => go(`#/song/${l.songs[k]}?list=${listId}&i=${k}${auto ? '&auto=1' : ''}`, { replace: true });
 
   // per-song view settings (synced with the song; in memory for a preview)
   const vs = () => song.view || {};
@@ -76,7 +87,7 @@ export function view(route, { go, back }) {
   const ttl = h('div', { class: 'ttl' }, song.title);
   const listNav = listId ? setlistNav() : null;
   const bar = h('div', { class: 'song-bar' },
-    iconButton('back', 'Back', () => back(listId ? `#/?list=${listId}` : '#/')),
+    iconButton('back', 'Back', () => back(listId && !isShuffle ? `#/?list=${listId}` : '#/')),
     ttl,
     listNav,
     isPreview ? button('Save', () => saveIt(false), { cls: 'btn-primary btn-small' }) : fav,
@@ -139,7 +150,7 @@ export function view(route, { go, back }) {
         h('div', { class: 'song-art', 'aria-hidden': 'true' }, cover ? h('img', { src: cover, alt: '', onError: e => e.target.replaceWith(tile()) }) : tile()),
         h('div', { class: 'song-title-text' },
           h('h1', {}, song.title),
-          h('p', { class: 'by' }, song.artist ? h('a', { href: `#/?q=${encodeURIComponent(song.artist)}`, onClick: e => { e.preventDefault(); session.query = song.artist; go('#/'); } }, song.artist) : ''))),
+          h('p', { class: 'by' }, song.artist ? h('a', { href: `#/?q=${encodeURIComponent(song.artist)}` }, song.artist) : ''))),
       h('div', { class: 'song-meta' }, chips),
       isPreview ? h('div', { class: 'preview-banner' }, icon('cloud'), h('span', {}, 'From Ultimate Guitar. Save it to keep it offline and in sync.'), button('Save', () => saveIt(false), { cls: 'btn-primary btn-small' })) : null,
       song.notes ? h('p', { class: 'hint', style: { whiteSpace: 'pre-wrap', margin: '10px 0 0' } }, song.notes) : null,
@@ -319,21 +330,22 @@ export function view(route, { go, back }) {
   }
 
   function ended() {
-    if (!listId) return;
-    const l = store.lib.setlists[listId];
-    const nextId = l?.songs[listIndex + 1];
-    const next = nextId && store.lib.songs[nextId];
-    if (next) toast(`Next: ${next.title}`, { action: 'Play', ms: 10000, onAction: () => go(`#/song/${next.id}?list=${listId}&i=${listIndex + 1}&auto=1`) });
+    const l = listId && playList();
+    const k = l ? step(l, 1) : -1;
+    const next = k >= 0 && store.lib.songs[l.songs[k]];
+    if (next) toast(`Next: ${next.title}`, { action: 'Play', ms: 10000, onAction: () => playAt(l, k, true) });
   }
 
   function setlistNav() {
-    const l = store.lib.setlists[listId];
+    const l = playList();
     if (!l) return null;
-    const prev = l.songs[listIndex - 1], next = l.songs[listIndex + 1];
-    return h('span', { style: { display: 'flex' } },
-      iconButton('back', 'Previous song in the setlist', () => prev && go(`#/song/${prev}?list=${listId}&i=${listIndex - 1}`), { cls: prev ? '' : 'disabled' }),
-      h('span', { class: 'eyebrow', style: { alignSelf: 'center' } }, `${listIndex + 1}/${l.songs.length}`),
-      iconButton('forward', 'Next song in the setlist', () => next && go(`#/song/${next}?list=${listId}&i=${listIndex + 1}`), { cls: next ? '' : 'disabled' }));
+    const p = step(l, -1), n = step(l, 1);
+    const what = isShuffle ? '' : ' in the setlist';
+    return h('span', { class: 'list-nav', style: { display: 'flex' } },
+      iconButton('back', `Previous song${what}`, () => p >= 0 && playAt(l, p), { cls: p >= 0 ? '' : 'disabled' }),
+      h('span', { class: 'eyebrow', style: { alignSelf: 'center', display: 'inline-flex', alignItems: 'center', gap: '3px' }, title: isShuffle ? 'Favorites, shuffled' : null },
+        isShuffle ? icon('shuffle', { size: 14 }) : null, `${listIndex + 1}/${l.songs.length}`),
+      iconButton('forward', `Next song${what}`, () => n >= 0 && playAt(l, n), { cls: n >= 0 ? '' : 'disabled' }));
   }
 
   // ---------- tools: transpose, capo, size ----------

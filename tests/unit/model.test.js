@@ -1,5 +1,5 @@
 import { test, eq, ok, deepEq } from '../harness.js';
-import { emptyLibrary, makeSong, applyOp, applyOps, invertOp, normalize, searchSongs, sortSongs, groupByArtist, findDuplicate, fold, diffOps } from '../../js/model.js';
+import { emptyLibrary, makeSong, applyOp, applyOps, invertOp, normalize, searchSongs, sortSongs, groupByArtist, findDuplicate, fold, diffOps, shuffled } from '../../js/model.js';
 
 const lib0 = () => {
   let lib = emptyLibrary();
@@ -116,4 +116,19 @@ test('diffOps: what changed between two copies, field by field', () => {
   eq(merged.songs['s-1'].notes, 'n');
   deepEq(merged.songs['s-1'].view, { capo: 1, simplify: true });
   deepEq(merged.setlists['l-1'].songs, ['s-1', 's-9']);
+});
+
+test('shuffling: every song once, in an order that changes, every order about as likely', () => {
+  const ids = ['a', 'b', 'c', 'd', 'e', 'f'];
+  const once = shuffled(ids);
+  deepEq([...once].sort(), ids, 'each one exactly once');
+  deepEq(ids, ['a', 'b', 'c', 'd', 'e', 'f'], 'the list itself is left as it was');
+  // with a seeded random: which song comes first, over many shuffles
+  let seed = 7;
+  const rand = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const first = {};
+  for (let i = 0; i < 6000; i++) { const x = shuffled(ids, rand)[0]; first[x] = (first[x] || 0) + 1; }
+  for (const id of ids) ok(first[id] > 850 && first[id] < 1150, `${id} first ${first[id]} times of 6000`);
+  deepEq(shuffled([]), []);
+  deepEq(shuffled(['solo']), ['solo']);
 });

@@ -348,6 +348,16 @@ export function groupByArtist(songs) {
   return [...groups.entries()].map(([artist, list]) => ({ artist, songs: list }));
 }
 
+// A list in random order (every order as likely).
+export function shuffled(list, rand = Math.random) {
+  const out = [...list];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
 // The same song from the same source counts as a duplicate.
 export function findDuplicate(lib, song) {
   const url = song.src?.url;
