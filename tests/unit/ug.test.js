@@ -1,5 +1,5 @@
 import { test, eq, ok, deepEq } from '../harness.js';
-import { parseTCList, matchEntry, numberVersions, groupResults, shapesFromApplicature, songFromTab, videoIdFrom, score } from '../../js/ug.js';
+import { parseTCList, matchEntry, numberVersions, groupResults, shapesFromApplicature, songFromTab, videoIdFrom, score, bestVersion } from '../../js/ug.js';
 
 // A made-up list in the exact shape of the Tabs & Chords "My tabs" page.
 const SAMPLE = [
@@ -97,6 +97,14 @@ test('grouping results into songs with versions', () => {
   eq(g[0].versions.length, 2);
   eq(g[0].best.url, '2');
   ok(score({ rating: 4.8, votes: 3000 }) > score({ rating: 5, votes: 2 }));
+});
+
+test('the version opened when you tap the song: best rated by the most, chords or tab, never Guitar Pro', () => {
+  const v = (type, url, rating, votes, version = 1) => ({ type, url, rating, votes, version });
+  eq(bestVersion([v('Chords', 'c1', 4.7, 18), v('Tabs', 't1', 4.6, 34), v('Pro', 'p1', 4.9, 900)]).url, 't1', 'the fiddle tune’s tab, rated by more people');
+  eq(bestVersion([v('Chords', 'c1', 4.8, 288), v('Tabs', 't1', 4.8, 153)]).url, 'c1', 'the song’s chords');
+  eq(bestVersion([v('Chords', 'c1', 0, 0, 1), v('Chords', 'c2', 0, 0, 2)]).url, 'c1', 'no ratings yet: version 1');
+  eq(bestVersion([v('Pro', 'p1', 5, 10)]), null);
 });
 
 test('chord shapes from Ultimate Guitar data are flipped to low string first', () => {

@@ -90,8 +90,7 @@ export function groupResults(results) {
   const list = [...groups.values()];
   for (const g of list) {
     g.versions.sort((a, b) => TYPE_ORDER[a.type] - TYPE_ORDER[b.type] || a.version - b.version);
-    const chords = g.versions.filter(v => v.type === 'Chords');
-    g.best = (chords.length ? chords : g.versions).reduce((a, b) => (score(b) > score(a) ? b : a));
+    g.best = bestVersion(g.versions);
   }
   // keep Ultimate Guitar's relevance order, but drop near-empty duplicates down
   return list.sort((a, b) => a.order - b.order);
@@ -99,6 +98,15 @@ export function groupResults(results) {
 
 // Rating that doesn't let a 5.0 from 3 votes beat a 4.8 from 30,000.
 export const score = r => (r.rating || 0) * (1 - 1 / Math.sqrt((r.votes || 0) + 1));
+
+// The version to open when you don't pick one: the best rated, by the most
+// people, chords or tab (a fiddle tune's tab, a song's chords, mostly); when
+// none has ratings, the first, version 1. Never a Guitar Pro file, which
+// can't be shown.
+export function bestVersion(versions) {
+  const ok = versions.filter(v => v.type !== 'Pro');
+  return ok.length ? ok.reduce((a, b) => (score(b) > score(a) ? b : a)) : null;
+}
 
 export async function fetchTab(url, opts) {
   const data = await call({ action: 'tab', url }, opts);

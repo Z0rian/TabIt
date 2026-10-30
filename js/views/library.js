@@ -4,7 +4,7 @@
 import { h, icon, iconButton, button, toast, swipeToDelete, seg, drawer, promptSheet, confirmSheet, relTime, initials, debounce, fill } from '../ui.js';
 import { store, subscribe, dispatch, undoable, signedIn } from '../store.js';
 import { searchSongs, sortSongs, groupByArtist, SORTS, newId, findDuplicate, shuffled } from '../model.js';
-import { searchUG, groupResults, fetchTab, songFromTab, isTabType, versionKind, score } from '../ug.js';
+import { searchUG, groupResults, fetchTab, songFromTab, isTabType, versionKind, bestVersion } from '../ug.js';
 import { prefs } from '../prefs.js';
 import { session } from '../session.js';
 import { syncPill } from './common.js';
@@ -239,19 +239,24 @@ function resultRow(g, { go, type = 'all' }) {
   const tabs = visible.filter(v => isTabType(v.type));
   const mixed = chords.length > 0 && tabs.length > 0;
   const shown = mixed ? [...chords.slice(0, 6), ...tabs.slice(0, 6)] : visible.slice(0, 10);
-  const best = visible.includes(g.best) ? g.best : visible.reduce((a, b) => (score(b) > score(a) ? b : a));
+  const best = bestVersion(visible);
   // "Ver 2" when they're all chords of the whole song; else "Chords 2", "Tab 3", "Intro tab 1"
   const named = mixed || visible.some(v => isTabType(v.type) || v.part);
   const label = v => (named ? `${versionKind(v)} ${v.version}` : `Ver ${v.version}`);
-  return h('div', { class: 'row', style: { alignItems: 'flex-start' } },
+  // Tapped anywhere but on a version: the one marked best (the best rated,
+  // by the most people; version 1 when none has ratings yet), or the one
+  // you've saved already.
+  const yours = inLib.find(s => s.src.url === best.url) || inLib[0];
+  const openBest = () => (yours ? go(`#/song/${yours.id}`) : openResult(best, g, { go }));
+  return h('div', { class: 'row', style: { alignItems: 'flex-start' }, onClick: openBest },
     h('div', { class: 'row-art', 'aria-hidden': 'true' }, best.cover ? h('img', { src: best.cover, alt: '', loading: 'lazy' }) : initials(g.artist)),
     h('div', { class: 'row-main' },
-      h('div', { class: 'row-title' }, g.title),
+      h('div', { class: 'row-title', role: 'link', tabindex: '0', title: yours ? 'Open yours' : `Open ${label(best)}`, onKeydown: e => { if (e.key === 'Enter') openBest(); } }, g.title),
       h('div', { class: 'row-sub' }, g.artist, inLib.length ? ' · in your library' : ''),
       h('div', { class: 'result-ver' }, shown.map(v => h('button', {
         type: 'button', class: `ver-btn ${v === best ? 'best' : ''}`,
         'aria-label': `${versionKind(v)} version ${v.version}, rated ${v.rating.toFixed(1)} by ${v.votes}`,
-        onClick: () => openResult(v, g, { go }),
+        onClick: e => { e.stopPropagation(); openResult(v, g, { go }); },
       }, label(v), v.votes ? h('span', { class: 'stars' }, `★${v.rating.toFixed(1)}`) : null, v.votes ? h('span', { class: 'votes' }, compact(v.votes)) : null)))));
 }
 

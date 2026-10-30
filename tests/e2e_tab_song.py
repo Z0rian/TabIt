@@ -75,13 +75,32 @@ def run(engine, device, base, tabs):
         check(not any('Pro' in l for l in labels), 'no Guitar Pro buttons')
         expect(page.get_by_text('only on Ultimate Guitar as Guitar Pro files')).to_be_visible()
         check(True, 'a song only in Guitar Pro is mentioned, not listed')
+
+        # tapping the song itself, not one of its versions: the one marked best
+        # (the tab rated by 34 people, not the chords rated by 3)
+        result = page.locator('.list .row', has=page.locator('.result-ver')).first
+        best = result.locator('.ver-btn.best').inner_text().split('★')[0].strip()
+        result.locator('.row-title').click()
+        page.wait_for_selector('.sheet', timeout=10000)
+        meta = page.locator('.song-meta').inner_text()
+        check(best == 'Tab 1' and 'UG tab ver 1' in meta, f'tapping the song opens the version marked best ({best}: {meta.splitlines()[-1]})')
+        page.go_back()
+        expect(page.locator('.result-ver .ver-btn').first).to_be_visible(timeout=10000)
+
         page.locator('.ug-types').get_by_role('button', name='Tabs').click()
         labels = page.locator('.result-ver .ver-btn').all_inner_texts()
         check(labels and all(l.startswith('Tab ') for l in labels), f'“Tabs” shows only tabs ({len(labels)})')
 
         print(f'[{device}] a tab')
-        page.locator('.result-ver .ver-btn').first.click()
+        result = page.locator('.list .row', has=page.locator('.result-ver')).first
+        best_tab = result.locator('.ver-btn.best')
+        want = best_tab.get_attribute('aria-label')  # e.g. "Tab version 2, rated 4.6 by 34"
+        votes = max(t['result'].get('votes') or 0 for t in tabs)
+        check(f'by {votes}' in want, f'among the tabs, the best is the one with the most ratings ({want})')
+        result.locator('.row-art').click()
         page.wait_for_selector('.sheet .tab .sys', timeout=10000)
+        version = want.split('version ')[1].split(',')[0]
+        check(f'UG tab ver {version}' in page.locator('.song-meta').inner_text(), f'tapping it opens that one (version {version})')
         r = page.evaluate(CHECK)
         check(not r['problems'], f"{r['stats']['staves']} staves laid out right ({r['stats']['oneRow']} on one row)")
         meta = page.locator('.song-meta').inner_text()
@@ -113,6 +132,14 @@ def run(engine, device, base, tabs):
         page.locator('.search .clear').click()
         expect(page.locator('.row', has_text='Foggy Mountain Breakdown').locator('.row-sub')).to_contain_text('Tab')
         check(True, 'the library says “Tab”')
+        box = page.get_by_placeholder('Search your songs or Ultimate Guitar')
+        box.fill('foggy mountain breakdown')
+        box.press('Enter')
+        expect(page.locator('.result-ver .ver-btn').first).to_be_visible(timeout=10000)
+        page.locator('.list .row', has=page.locator('.result-ver')).first.locator('.row-title').click()
+        page.wait_for_selector('.sheet')
+        saved = page.evaluate("async () => Object.keys((await import('/js/store.js')).store.lib.songs)[0]")
+        check(page.evaluate('location.hash').startswith(f'#/song/{saved}'), 'once one is saved, tapping the song opens yours')
         if errors:
             raise AssertionError(errors)
         b.close()
